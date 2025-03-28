@@ -1,10 +1,9 @@
-# Python artifacts
+# Python-related
 __pycache__/
 *.py[cod]
-*$py.class
+*.class
 *.so
 .Python
-env/
 build/
 develop-eggs/
 dist/
@@ -16,18 +15,30 @@ lib64/
 parts/
 sdist/
 var/
+wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 
-# Virtual Environment
+# Virtual environments
 venv/
 env/
 ENV/
 
-# Audio and temporary files
+# Audio segments created during processing
 *_segment_*.wav
-*.wav
-*.mp3
-*.mp4
-*.mkv
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Authentication scripts
+setup-github-auth.sh
+push-whisper-repo.sh
+push-whisper.sh

@@ -1,6 +1,6 @@
 # Audio Transcription Tool
 
-A Python script for transcribing audio files using OpenAI's Whisper model with silence-based segmentation.
+A Python script for transcribing audio files using OpenAI's Whisper model with silence-based segmentation. The tool optimizes transcription by splitting audio into segments based on silence detection. The tool optimizes transcription by splitting audio into segments based on silence detection.
 
 ## Features
 
