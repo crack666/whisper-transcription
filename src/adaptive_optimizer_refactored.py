@@ -182,7 +182,8 @@ class AdaptiveOptimizer:
                     processing_time=0,
                     success=False,
                     quality_score=0.0,
-                    audio_profile=audio_profile,                    timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
+                    audio_profile=audio_profile,
+                    timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
                 ))
         
         return results
@@ -200,14 +201,14 @@ class AdaptiveOptimizer:
                 'min_silence_len': config['min_silence_len'],
                 'padding': config['padding'],
                 'silence_adjustment': config['silence_adjustment'],
-                'cleanup_segments': True
-            }
+                'cleanup_segments': True            }
             
             transcriber = AudioTranscriber(
                 model_name=config['model'],
                 config=transcriber_config
             )
-              # Run transcription
+            
+            # Run transcription
             result = transcriber.transcribe_audio_file(audio_file)
             
             # Extract metrics - transcriber returns a dictionary

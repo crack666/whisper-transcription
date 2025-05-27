@@ -283,9 +283,10 @@ class RobustAudioTranscriber:
                         # Create merged segment
                         merged_start = max(0, start - padding)
                         merged_end = min(total_duration, next_end + padding)
+                        segment_prefix = self.config.get('segment_prefix', 'segment')
                         
                         segment = audio[merged_start:merged_end]
-                        segment_file = f"{audio_file}_segment_{len(segments):03d}.wav"
+                        segment_file = f"{audio_file}_{segment_prefix}_{len(segments):03d}.wav"
                         segment.export(segment_file, format="wav")
                         
                         segments.append((segment_file, merged_start, merged_end))
@@ -298,9 +299,10 @@ class RobustAudioTranscriber:
                     if segment_length >= 1000:  # At least 1 second
                         padded_start = max(0, start - padding)
                         padded_end = min(total_duration, end + padding)
+                        segment_prefix = self.config.get('segment_prefix', 'segment')
                         
                         segment = audio[padded_start:padded_end]
-                        segment_file = f"{audio_file}_segment_{len(segments):03d}.wav"
+                        segment_file = f"{audio_file}_{segment_prefix}_{len(segments):03d}.wav"
                         segment.export(segment_file, format="wav")
                         
                         segments.append((segment_file, padded_start, padded_end))
@@ -315,6 +317,7 @@ class RobustAudioTranscriber:
                 # Split into overlapping chunks
                 chunk_start = start
                 chunk_index = 0
+                segment_prefix = self.config.get('segment_prefix', 'segment')
                 
                 while chunk_start < end:
                     chunk_end = min(chunk_start + max_length, end)
@@ -324,7 +327,7 @@ class RobustAudioTranscriber:
                     padded_end = min(total_duration, chunk_end + padding)
                     
                     segment = audio[padded_start:padded_end]
-                    segment_file = f"{audio_file}_segment_{len(segments):03d}_{chunk_index}.wav"
+                    segment_file = f"{audio_file}_{segment_prefix}_{len(segments):03d}_{chunk_index}.wav"
                     segment.export(segment_file, format="wav")
                     
                     segments.append((segment_file, padded_start, padded_end))
@@ -336,9 +339,10 @@ class RobustAudioTranscriber:
                 # Normal segment with padding
                 padded_start = max(0, start - padding)
                 padded_end = min(total_duration, end + padding)
+                segment_prefix = self.config.get('segment_prefix', 'segment')
                 
                 segment = audio[padded_start:padded_end]
-                segment_file = f"{audio_file}_segment_{len(segments):03d}.wav"
+                segment_file = f"{audio_file}_{segment_prefix}_{len(segments):03d}.wav"
                 segment.export(segment_file, format="wav")
                 
                 segments.append((segment_file, padded_start, padded_end))

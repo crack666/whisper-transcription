@@ -10,11 +10,16 @@ from pydub import AudioSegment, silence
 import os
 from pathlib import Path
 import tqdm
+import threading
 
 from .config import LANGUAGE_MAP, DEFAULT_CONFIG
 from .utils import format_timestamp
 
 logger = logging.getLogger(__name__)
+
+# Global model cache for sharing between instances
+_model_cache = {}
+_model_lock = threading.Lock()
 
 class AudioTranscriber:
     """
@@ -48,25 +53,38 @@ class AudioTranscriber:
         logger.info(f"Initialized AudioTranscriber with model: {model_name}, language: {language}")
     
     def load_model(self) -> None:
-        """Load the Whisper model if not already loaded."""
+        """Load the Whisper model if not already loaded (shared across instances)."""
         if self.model is None:
             import torch
             
             if self.device is None:
                 self.device = "cuda" if torch.cuda.is_available() else "cpu"
             
-            logger.info(f"Loading Whisper model: {self.model_name} on {self.device}")
+            # Create cache key for this model+device combination
+            cache_key = f"{self.model_name}_{self.device}"
             
-            if self.device.startswith("cuda"):
-                try:
-                    logger.info(f"CUDA device: {torch.cuda.get_device_name(0)}")
-                    memory_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-                    logger.info(f"CUDA memory: {memory_gb:.2f} GB")
-                except Exception as e:
-                    logger.warning(f"Could not get CUDA info: {e}")
-            
-            self.model = whisper.load_model(self.model_name, device=self.device)
-            logger.info("Model loaded successfully")
+            # Check if model is already loaded in cache
+            with _model_lock:
+                if cache_key in _model_cache:
+                    logger.info(f"Using cached Whisper model: {self.model_name} on {self.device}")
+                    self.model = _model_cache[cache_key]
+                    return
+                
+                logger.info(f"Loading Whisper model: {self.model_name} on {self.device}")
+                
+                if self.device.startswith("cuda"):
+                    try:
+                        logger.info(f"CUDA device: {torch.cuda.get_device_name(0)}")
+                        memory_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                        logger.info(f"CUDA memory: {memory_gb:.2f} GB")
+                    except Exception as e:
+                        logger.warning(f"Could not get CUDA info: {e}")
+                
+                # Load model and cache it
+                model = whisper.load_model(self.model_name, device=self.device)
+                _model_cache[cache_key] = model
+                self.model = model
+                logger.info("Model loaded successfully and cached")
     
     def analyze_background_noise(self, audio_file: str) -> float:
         """
@@ -124,22 +142,25 @@ class AudioTranscriber:
         
         if not nonsilent_ranges:
             logger.warning("No speech detected, using entire file as single segment")
-            segment_file = f"{audio_file}_segment_0.wav"
+            # Use unique segment prefix for thread safety
+            segment_prefix = self.config.get('segment_prefix', 'segment')
+            segment_file = f"{audio_file}_{segment_prefix}_0.wav"
             audio.export(segment_file, format="wav")
             return [(segment_file, 0, total_duration_ms)]
         
         # Create segments with padding
         segments = []
         base_name = Path(audio_file).stem
+        segment_prefix = self.config.get('segment_prefix', 'segment')
         
         for i, (start, end) in enumerate(nonsilent_ranges):
             # Apply padding while staying within bounds
             segment_start = max(0, start - self.config['padding'])
             segment_end = min(total_duration_ms, end + self.config['padding'])
             
-            # Extract segment
+            # Extract segment with unique naming
             segment = audio[segment_start:segment_end]
-            segment_file = f"{audio_file}_segment_{i:03d}.wav"
+            segment_file = f"{audio_file}_{segment_prefix}_{i:03d}.wav"
             segment.export(segment_file, format="wav")
             
             segments.append((segment_file, segment_start, segment_end))

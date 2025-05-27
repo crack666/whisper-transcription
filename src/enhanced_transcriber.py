@@ -311,6 +311,7 @@ class EnhancedAudioTranscriber:
                 # Split into overlapping chunks
                 chunk_start = start
                 chunk_index = 0
+                segment_prefix = self.config.get('segment_prefix', 'segment')
                 
                 while chunk_start < end:
                     chunk_end = min(chunk_start + max_length, end)
@@ -320,7 +321,7 @@ class EnhancedAudioTranscriber:
                     padded_end = min(total_duration, chunk_end + padding)
                     
                     segment = audio[padded_start:padded_end]
-                    segment_file = f"{audio_file}_segment_{len(segments):03d}_{chunk_index}.wav"
+                    segment_file = f"{audio_file}_{segment_prefix}_{len(segments):03d}_{chunk_index}.wav"
                     segment.export(segment_file, format="wav")
                     
                     segments.append((segment_file, padded_start, padded_end))
@@ -332,9 +333,10 @@ class EnhancedAudioTranscriber:
                 # Normal segment with padding
                 padded_start = max(0, start - padding)
                 padded_end = min(total_duration, end + padding)
+                segment_prefix = self.config.get('segment_prefix', 'segment')
                 
                 segment = audio[padded_start:padded_end]
-                segment_file = f"{audio_file}_segment_{len(segments):03d}.wav"
+                segment_file = f"{audio_file}_{segment_prefix}_{len(segments):03d}.wav"
                 segment.export(segment_file, format="wav")
                 
                 segments.append((segment_file, padded_start, padded_end))
