@@ -10,7 +10,11 @@ from pydub import AudioSegment, silence
 import os
 from glob import glob
 import re
+import warnings
 from typing import Dict, List, Tuple, Optional, Union, Any
+
+# Suppress specific TorchAudio warnings
+warnings.filterwarnings("ignore", message="The MPEG_LAYER_III subtype is unknown to TorchAudio")
 
 # Configure logging
 logging.basicConfig(
@@ -56,6 +60,8 @@ def setup_argparse():
                         help=f"Whisper model to use (default: large-v3). Options: {', '.join(WHISPER_MODELS)}")
     parser.add_argument("--no_fp16", action="store_true", 
                         help="Disable FP16 for faster processing on CPUs without AVX2")
+    parser.add_argument("--device", type=str, default=None,
+                        help="Device to use for inference (cpu, cuda, cuda:0, etc.). Default: auto-detect")
     
     # Processing options
     parser.add_argument("--workers", type=int, default=1, 
@@ -245,16 +251,40 @@ def load_diarization_model():
     """
     try:
         from pyannote.audio import Pipeline
+        import huggingface_hub
         
         try:
+            # Get token from environment variable
+            token = os.environ.get("HF_TOKEN")
+            
+            if not token:
+                logger.error("HF_TOKEN environment variable is not set")
+                logger.warning("Speaker diarization requires a Hugging Face token. Set the HF_TOKEN environment variable.")
+                return None
+                
+            # Log token length for debugging (don't log the actual token)
+            logger.info(f"Using Hugging Face token (length: {len(token)})")
+            
+            # First try to explicitly login to HF
+            try:
+                huggingface_hub.login(token=token)
+                logger.info("Logged in to Hugging Face Hub")
+            except Exception as login_error:
+                logger.warning(f"Hugging Face login failed: {login_error}")
+            
+            # Then try loading the pipeline with the token
             pipeline = Pipeline.from_pretrained(
                 "pyannote/speaker-diarization-3.1",
-                use_auth_token=os.environ.get("HF_TOKEN")
+                use_auth_token=token
             )
+            
+            logger.info("Successfully loaded diarization model")
             return pipeline
+            
         except Exception as e:
             logger.error(f"Failed to load diarization model: {e}")
-            logger.warning("Speaker diarization requires a Hugging Face token. Set the HF_TOKEN environment variable.")
+            logger.warning("Make sure you've accepted the user conditions at https://hf.co/pyannote/speaker-diarization-3.1")
+            logger.warning("And ensure your token has the required permissions (needs read access)")
             return None
             
     except ImportError:
@@ -352,7 +382,34 @@ def transcribe_segment(
     segment_file, start_time, end_time = segment_info
     
     try:
-        result = model.transcribe(segment_file, language=language, verbose=False, fp16=fp16)
+        # Add error handling for PyTorch attention size mismatch errors
+        try:
+            # Pass initial_prompt to help with transcription context
+            initial_prompt = "This is an audio transcription."
+            result = model.transcribe(
+                segment_file, 
+                language=language, 
+                verbose=False, 
+                fp16=fp16,
+                initial_prompt=initial_prompt,
+                condition_on_previous_text=True  # Use previous text for context
+            )
+        except RuntimeError as e:
+            # Check if it's the key.size(1) == value.size(1) error
+            if "Expected key.size(1) == value.size(1)" in str(e):
+                # Retry with fp16=False which often resolves this issue
+                logger.warning(f"Attention size mismatch error detected for {segment_file}, retrying with fp16=False")
+                result = model.transcribe(
+                    segment_file, 
+                    language=language, 
+                    verbose=False, 
+                    fp16=False,
+                    initial_prompt=initial_prompt,
+                    condition_on_previous_text=True
+                )
+            else:
+                # If it's a different RuntimeError, re-raise it
+                raise
         
         # Extract segment ID from filename
         segment_id = segment_idx
@@ -598,7 +655,22 @@ def process_audio(args):
     
     # Load the Whisper model
     logger.info(f"Loading Whisper model: {args.model}")
-    model = whisper.load_model(args.model)
+    
+    # Determine device
+    import torch
+    if args.device:
+        device = args.device
+    else:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    logger.info(f"Using device: {device}")
+    if device == "cpu":
+        logger.warning("Running on CPU. This will be significantly slower than using a GPU.")
+    elif device.startswith("cuda"):
+        logger.info(f"CUDA device: {torch.cuda.get_device_name(0)}")
+        logger.info(f"CUDA memory: {torch.cuda.get_device_properties(0).total_memory / (1024**3):.2f} GB")
+    
+    model = whisper.load_model(args.model, device=device)
     
     # Prepare for processing
     total_segments = len(segment_infos)
