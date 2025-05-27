@@ -42,3 +42,43 @@ Thumbs.db
 setup-github-auth.sh
 push-whisper-repo.sh
 push-whisper.sh
+
+# Node modules
+node_modules/
+
+# Logs
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Output and results
+output/
+*.json
+*.wav
+
+# Videos and audio
+*.mp4
+*.mp3
+
+# PDFs and documents
+*.pdf
+*.txt
+
+# Temporary files
+*.bak
+*.tmp
+*.swp
+
+# Editor / OS specific
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Claude output folders (if you use it)
+.claude/
+
+# Studies directory – ignore all content
+studies/*
