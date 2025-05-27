@@ -70,8 +70,9 @@ class AdaptiveOptimizer:
     for different audio profiles and speaker patterns.
     """
     
-    def __init__(self, optimization_db_path: str = "optimization_database.json"):
+    def __init__(self, optimization_db_path: str = "optimization_database.json", default_model: str = "large-v3"):
         self.db_path = optimization_db_path
+        self.default_model = default_model
         self.logger = logging.getLogger(__name__)
         self.optimization_history = self.load_optimization_history()
         
@@ -305,7 +306,7 @@ class AdaptiveOptimizer:
                 configs.append({
                     "name": config_name,
                     "transcriber": "standard",  # Most results show standard works better
-                    "model": "tiny",  # For fast testing
+                    "model": self.default_model,  # Use realistic model
                     **config,
                     "source": "learned_from_similar"
                 })
@@ -319,7 +320,7 @@ class AdaptiveOptimizer:
             configs.append({
                 "name": f"base_{base_name}",
                 "transcriber": "standard",
-                "model": "tiny",
+                "model": self.default_model,
                 **base_config,
                 "source": "base_template"
             })
@@ -336,7 +337,7 @@ class AdaptiveOptimizer:
             configs.append({
                 "name": "adaptive_dense_speech",
                 "transcriber": "standard",
-                "model": "tiny",
+                "model": self.default_model,
                 "min_silence_len": max(1000, int(profile.estimated_pause_length * 0.5)),
                 "silence_adjustment": 3.0,
                 "min_segment_length": 800,
@@ -349,7 +350,7 @@ class AdaptiveOptimizer:
             configs.append({
                 "name": "adaptive_sparse_speech",
                 "transcriber": "standard",
-                "model": "tiny",
+                "model": self.default_model,
                 "min_silence_len": min(3000, int(profile.estimated_pause_length * 1.2)),
                 "silence_adjustment": 5.0,
                 "min_segment_length": 1500,
@@ -362,7 +363,7 @@ class AdaptiveOptimizer:
             configs.append({
                 "name": "adaptive_moderate_speech",
                 "transcriber": "standard",
-                "model": "tiny",
+                "model": self.default_model,
                 "min_silence_len": int(profile.estimated_pause_length),
                 "silence_adjustment": 4.0,
                 "min_segment_length": 1200,
@@ -384,7 +385,7 @@ class AdaptiveOptimizer:
         configs.append({
             "name": "adaptive_volume_optimized",
             "transcriber": "standard",
-            "model": "tiny",
+            "model":  self.default_model,
             "min_silence_len": 1500,
             "silence_adjustment": silence_adj,
             "min_segment_length": 1000,
