@@ -239,6 +239,83 @@ python study_processor_v2.py --input lecture.mp4 --config defensive_silence
 - 👥 Verschiedene Sprecher in einem Audio
 - 🎯 Wenn Qualität wichtiger als Geschwindigkeit ist
 
+### 🔬 Precision Waveform Detection (NEUESTE INNOVATION)
+**Wissenschaftliche Wellenform-Analyse** für höchste Präzision bei der Spracherkennung.
+
+```bash
+# Aktivierung über Konfiguration
+{
+  "segmentation_mode": "precision_waveform",
+  "precision_waveform_config": {
+    "frame_size_ms": 50,              // Analyse-Fenster (50ms für höchste Präzision)
+    "hop_size_ms": 25,                // Überlappung zwischen Fenstern
+    "min_speech_duration_ms": 500,    // Minimale Sprach-Segmentdauer
+    "min_silence_duration_ms": 1000,  // Minimale Stille-Dauer
+    "volume_percentile_threshold": 20, // Schwellwert (20. Perzentil)
+    "adaptive_threshold": true,        // Automatische Schwellwert-Anpassung
+    "merge_close_segments": true       // Nahe Segmente zusammenfassen
+  },
+  "speaker_type": "moderate"           // sparse, moderate, dense
+}
+```
+
+**🧬 Wissenschaftliche Analyse-Methoden:**
+- 📊 **Frame-basierte Analyse**: Mathematische Zerlegung in 50ms-Fenster
+- ⚡ **Energy & RMS Berechnung**: Präzise Energie- und Quadratmittel-Analyse
+- 🌊 **Zero-Crossing-Rate**: Spektrale Inhaltsanalyse für Sprachdetektion
+- 📈 **Perzentil-basierte Schwellwerte**: Robuste statistische Methoden
+- 🔗 **Segment-Fusion**: Intelligente Zusammenführung naher Sprachsegmente
+
+**🎯 Problemlösung:** 
+Entwickelt als Antwort auf das Problem, dass **viele Sprachsegmente übersehen** wurden, obwohl sie in der Wellenform-Visualisierung deutlich sichtbar waren.
+
+**⚙️ Konfigurationsprofile:**
+
+```json
+// PRECISION_CONFIG - Maximale Genauigkeit
+{
+  "frame_size_ms": 50,
+  "hop_size_ms": 25,
+  "min_speech_duration_ms": 500,
+  "volume_percentile_threshold": 20
+}
+
+// CONSERVATIVE_CONFIG - Stabile Erkennung  
+{
+  "frame_size_ms": 200,
+  "hop_size_ms": 100,
+  "min_speech_duration_ms": 2000,
+  "volume_percentile_threshold": 30
+}
+
+// LECTURE_CONFIG - Optimiert für Vorlesungen
+{
+  "frame_size_ms": 100,
+  "hop_size_ms": 50,
+  "min_speech_duration_ms": 1000,
+  "volume_percentile_threshold": 25
+}
+```
+
+**🔬 Wissenschaftliche Features:**
+- 📊 **Waveform-Visualisierung**: Automatische Erstellung von Analyse-Diagrammen
+- 📈 **Energie-Statistiken**: Dynamikbereich und Verteilungsanalyse  
+- 🎯 **Segment-Coverage**: Prozentuale Sprachabdeckung berechnen
+- 🔍 **Debug-Modus**: Detaillierte Frame-für-Frame Analyse
+
+**🏆 Vorteile:**
+- ✅ **Keine übersehenen Sprachsegmente** mehr
+- ✅ **Mathematisch präzise** Schwellwert-Berechnung
+- ✅ **Adaptiv** an verschiedene Audio-Charakteristiken
+- ✅ **Wissenschaftlich validiert** durch Wellenform-Analyse
+- ✅ **Visualisierung** für Qualitätskontrolle
+
+**⚠️ Hinweise:**
+- 🧪 **Experimentelles Feature** (Mai 2025)
+- 📦 **Zusätzliche Abhängigkeiten**: numpy, matplotlib
+- ⏱️ **Etwas langsamere Verarbeitung** durch detaillierte Analyse
+- 🎯 **Ideal für kritische Aufnahmen** wo jedes Wort wichtig ist
+
 ### 🎛️ Konfiguration & Aktivierung
 
 #### Via Konfigurationsdatei

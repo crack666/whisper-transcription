@@ -388,7 +388,15 @@ class EnhancedAudioTranscriber:
         segments = []
         base_name = Path(audio_file).stem
         
+        # CRITICAL FIX: Safety limit to prevent runaway segment generation
+        MAX_SEGMENTS_ALLOWED = 500  # Reasonable limit for any audio file
+        
         for i, (start, end) in enumerate(nonsilent_ranges):
+            # CRITICAL FIX: Emergency break if too many segments
+            if len(segments) >= MAX_SEGMENTS_ALLOWED:
+                logger.error(f"EMERGENCY BREAK: Maximum segment limit ({MAX_SEGMENTS_ALLOWED}) reached! Stopping segment generation.")
+                logger.error(f"This likely indicates a bug in the segmentation logic.")
+                break
             segment_length = end - start
             
             # Handle short segments
@@ -409,6 +417,15 @@ class EnhancedAudioTranscriber:
                 while chunk_start < end:
                     chunk_end = min(chunk_start + max_length, end)
                     
+                    # CRITICAL FIX: Prevent infinite loop - ABSOLUTE REQUIREMENT
+                    if chunk_end <= chunk_start:
+                        logger.warning(f"Segment generation issue: chunk_end ({chunk_end}) <= chunk_start ({chunk_start}). Breaking loop.")
+                        break
+                    
+                    # ADDITIONAL CRITICAL FIX: If we're at the end, ensure we break next time
+                    if chunk_end >= end:
+                        logger.debug(f"Reached end of segment: chunk_end ({chunk_end}) >= end ({end})")
+                    
                     # Apply padding for context but ensure no overlap between segments
                     padded_start = max(0, chunk_start - padding)
                     padded_end = min(total_duration, chunk_end + padding)
@@ -419,16 +436,40 @@ class EnhancedAudioTranscriber:
                         if padded_start < prev_padded_end:
                             padded_start = prev_padded_end  # Start where previous ended
                     
-                    segment = audio[padded_start:padded_end]
-                    segment_file = f"{audio_file}_{segment_prefix}_{len(segments):03d}_{chunk_index}.wav"
-                    segment.export(segment_file, format="wav")
+                    try:
+                        segment = audio[padded_start:padded_end]
+                        segment_file = f"{audio_file}_{segment_prefix}_{len(segments):03d}_{chunk_index}.wav"
+                        segment.export(segment_file, format="wav")
+                        
+                        # Store both original timing (for output) and padded timing (for processing)
+                        segments.append((segment_file, chunk_start, chunk_end, padded_start, padded_end))
+                        
+                        logger.debug(f"Created segment {chunk_index}: {chunk_start}ms-{chunk_end}ms")
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to create segment {chunk_index}: {e}")
+                        break  # Exit on any segment creation error
                     
-                    # Store both original timing (for output) and padded timing (for processing)
-                    segments.append((segment_file, chunk_start, chunk_end, padded_start, padded_end))
-                    
-                    # Move to next chunk WITHOUT overlap
+                    # CRITICAL FIX: Absolute guarantee of forward progress
+                    old_chunk_start = chunk_start
                     chunk_start = chunk_end
+                    
+                    # EMERGENCY CHECK: Ensure we actually moved forward
+                    if chunk_start <= old_chunk_start:
+                        logger.error(f"CRITICAL BUG: chunk_start did not advance! old={old_chunk_start}, new={chunk_start}. BREAKING LOOP!")
+                        break
+                    
                     chunk_index += 1
+                    
+                    # CRITICAL FIX: Multiple safety checks to prevent infinite loops
+                    if chunk_index > 1000:  # Reasonable limit for segments  
+                        logger.error(f"EMERGENCY BREAK: Too many segments generated ({chunk_index}). Possible infinite loop detected!")
+                        break
+                        
+                    # ULTIMATE SAFETY: If we've somehow processed the same chunk too many times
+                    if chunk_start >= end:
+                        logger.debug(f"Loop termination: chunk_start ({chunk_start}) >= end ({end})")
+                        break
             else:
                 # Normal segment with padding but no overlap
                 padded_start = max(0, start - padding)
@@ -511,20 +552,49 @@ class EnhancedAudioTranscriber:
                 while chunk_start < end:
                     chunk_end = min(chunk_start + max_length, end)
                     
+                    # CRITICAL FIX: Prevent infinite loop
+                    if chunk_end <= chunk_start:
+                        logger.warning(f"Overlapping segment generation issue: chunk_end ({chunk_end}) <= chunk_start ({chunk_start}). Breaking loop.")
+                        break
+                    
                     # Apply padding
                     padded_start = max(0, chunk_start - padding)
                     padded_end = min(total_duration, chunk_end + padding)
                     
-                    segment = audio[padded_start:padded_end]
-                    segment_file = f"{audio_file}_{segment_prefix}_{len(segments):03d}_{chunk_index}.wav"
-                    segment.export(segment_file, format="wav")
+                    try:
+                        segment = audio[padded_start:padded_end]
+                        segment_file = f"{audio_file}_{segment_prefix}_{len(segments):03d}_{chunk_index}.wav"
+                        segment.export(segment_file, format="wav")
+                        
+                        # Store both original timing (for output) and padded timing (for processing)
+                        segments.append((segment_file, chunk_start, chunk_end, padded_start, padded_end))
+                        
+                        logger.debug(f"Created overlapping segment {chunk_index}: {chunk_start}ms-{chunk_end}ms")
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to create overlapping segment {chunk_index}: {e}")
+                        break
                     
-                    # Store both original timing (for output) and padded timing (for processing)
-                    segments.append((segment_file, chunk_start, chunk_end, padded_start, padded_end))
-                    
-                    # Move to next chunk with overlap
+                    # CRITICAL FIX: Ensure forward progress even with overlap
+                    old_chunk_start = chunk_start
                     chunk_start = chunk_end - overlap
+                    
+                    # EMERGENCY CHECK: Ensure we actually moved forward (accounting for overlap)
+                    if chunk_start >= old_chunk_start:
+                        # Normal forward progress
+                        pass
+                    else:
+                        # This is normal for overlap, but check if we're making progress toward the end
+                        if chunk_end >= end:
+                            logger.debug(f"Reached end with overlap: chunk_end ({chunk_end}) >= end ({end})")
+                            break
+                    
                     chunk_index += 1
+                    
+                    # CRITICAL FIX: Safety limit for overlapping segments
+                    if chunk_index > 1000:
+                        logger.error(f"EMERGENCY BREAK: Too many overlapping segments ({chunk_index}). Breaking loop!")
+                        break
             else:
                 # Normal segment with padding
                 padded_start = max(0, start - padding)
@@ -670,6 +740,11 @@ class EnhancedAudioTranscriber:
             nonsilent_ranges = self.defensive_silence_detection(audio, analysis)
             logger.info(f"Defensive silence detection: {len(nonsilent_ranges)} segments")
         
+        elif segmentation_mode == 'precision_waveform':
+            # Use scientific waveform analysis for maximum precision
+            nonsilent_ranges = self.precision_waveform_detection(audio, analysis)
+            logger.info(f"Precision waveform detection: {len(nonsilent_ranges)} segments")
+        
         elif segmentation_mode == 'adaptive':
             # Use improved adaptive strategy with defensive silence principles
             nonsilent_ranges = self.adaptive_silence_detection(audio, analysis)
@@ -692,8 +767,8 @@ class EnhancedAudioTranscriber:
         # Step 3: Create segments (with or without overlap based on mode)
         segmentation_mode = self.config.get('segmentation_mode', 'silence_detection')
         
-        if segmentation_mode == 'adaptive':
-            # For adaptive mode, use non-overlapping segments to prevent duplicates
+        if segmentation_mode in ['adaptive', 'defensive_silence', 'precision_waveform']:
+            # For adaptive, defensive_silence, and precision_waveform modes, use non-overlapping segments to prevent duplicates
             segments = self.create_non_overlapping_segments(audio_file, nonsilent_ranges, analysis)
         else:
             # For other modes, use overlapping segments (existing behavior)
@@ -1181,3 +1256,91 @@ class EnhancedAudioTranscriber:
             logger.info(f"🔧 Removed {overlap_removed} overlapping segments")
         
         return non_overlapping
+    
+    def precision_waveform_detection(self, audio: AudioSegment, analysis: Dict) -> List[Tuple[int, int]]:
+        """
+        Use scientific waveform analysis for precise speech segmentation.
+        
+        This method uses the WaveformAnalyzer module for mathematical analysis
+        of the audio waveform to detect speech segments with high precision.
+        
+        Args:
+            audio: AudioSegment object
+            analysis: Speech pattern analysis results
+            
+        Returns:
+            List of (start, end) tuples for speech segments in milliseconds
+        """
+        logger.info("🔬 Using PRECISION waveform detection - scientific analysis")
+        
+        try:
+            from .waveform_analyzer import WaveformAnalyzer, PRECISION_CONFIG
+            
+            # Create temporary audio file for analysis
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                temp_audio_path = temp_file.name
+                audio.export(temp_audio_path, format="wav")
+            
+            # Configure waveform analyzer based on speech analysis
+            speaker_type = analysis.get('speaker_type', 'moderate_speech')
+            
+            if speaker_type in ['very_sparse_speech', 'sparse_speech']:
+                # Use precision config for sparse speakers
+                config = PRECISION_CONFIG.copy()
+                config['min_speech_duration_ms'] = 500  # Very short segments ok
+                config['volume_percentile_threshold'] = 15  # Very sensitive
+            elif speaker_type in ['dense_speech', 'very_dense_speech']:
+                # Use conservative config for dense speakers  
+                from .waveform_analyzer import CONSERVATIVE_CONFIG
+                config = CONSERVATIVE_CONFIG.copy()
+            else:
+                # Use lecture config for moderate speakers
+                from .waveform_analyzer import LECTURE_CONFIG
+                config = LECTURE_CONFIG.copy()
+            
+            logger.info(f"📊 Using waveform config for {speaker_type}: "
+                       f"frame={config['frame_size_ms']}ms, "
+                       f"min_speech={config['min_speech_duration_ms']}ms")
+            
+            # Create analyzer and perform analysis
+            analyzer = WaveformAnalyzer(config)
+            waveform_result = analyzer.analyze_waveform(temp_audio_path)
+            
+            # Extract speech segments
+            speech_segments = waveform_result['speech_segments']
+            
+            # Log results
+            stats = waveform_result['statistics']
+            logger.info(f"🎯 Precision waveform results:")
+            logger.info(f"   Segments detected: {stats['num_segments']}")
+            logger.info(f"   Speech coverage: {stats['speech_coverage_percent']:.1f}%")
+            logger.info(f"   Avg segment duration: {stats['avg_segment_duration_seconds']:.1f}s")
+            logger.info(f"   Analysis time: {waveform_result['analysis_time_seconds']:.2f}s")
+            
+            # Create visualization if in debug mode
+            if self.config.get('create_waveform_visualization', False):
+                try:
+                    viz_path = analyzer.create_visualization(waveform_result)
+                    logger.info(f"📊 Waveform visualization saved: {viz_path}")
+                except Exception as e:
+                    logger.warning(f"Could not create visualization: {e}")
+            
+            # Cleanup temporary file
+            import os
+            try:
+                os.unlink(temp_audio_path)
+            except Exception as e:
+                logger.warning(f"Could not cleanup temp file: {e}")
+            
+            return speech_segments
+            
+        except ImportError as e:
+            logger.error(f"❌ Could not import WaveformAnalyzer: {e}")
+            logger.info("📋 Falling back to defensive silence detection")
+            return self.defensive_silence_detection(audio, analysis)
+        
+        except Exception as e:
+            logger.error(f"❌ Precision waveform detection failed: {e}")
+            logger.info("📋 Falling back to defensive silence detection")
+            return self.defensive_silence_detection(audio, analysis)
