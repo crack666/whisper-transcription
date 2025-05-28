@@ -262,7 +262,7 @@ class EnhancedAudioTranscriber:
         return merged_ranges
     
     def create_overlapping_segments(self, audio_file: str, nonsilent_ranges: List[Tuple[int, int]], 
-                                  analysis: Dict) -> List[Tuple[str, int, int]]:
+                                  analysis: Dict) -> List[Tuple[str, int, int, int, int]]:
         """
         Create audio segments with overlap to prevent cutting off speech.
         
@@ -272,7 +272,7 @@ class EnhancedAudioTranscriber:
             analysis: Speech pattern analysis
             
         Returns:
-            List of (segment_file_path, start_time_ms, end_time_ms)
+            List of (segment_file_path, original_start_ms, original_end_ms, padded_start_ms, padded_end_ms)
         """
         audio = AudioSegment.from_file(audio_file)
         total_duration = len(audio)
@@ -324,7 +324,8 @@ class EnhancedAudioTranscriber:
                     segment_file = f"{audio_file}_{segment_prefix}_{len(segments):03d}_{chunk_index}.wav"
                     segment.export(segment_file, format="wav")
                     
-                    segments.append((segment_file, padded_start, padded_end))
+                    # Store both original timing (for output) and padded timing (for processing)
+                    segments.append((segment_file, chunk_start, chunk_end, padded_start, padded_end))
                     
                     # Move to next chunk with overlap
                     chunk_start = chunk_end - overlap
@@ -339,9 +340,14 @@ class EnhancedAudioTranscriber:
                 segment_file = f"{audio_file}_{segment_prefix}_{len(segments):03d}.wav"
                 segment.export(segment_file, format="wav")
                 
-                segments.append((segment_file, padded_start, padded_end))
+                # Store both original timing (for output) and padded timing (for processing)
+                segments.append((segment_file, start, end, padded_start, padded_end))
         
         logger.info(f"Created {len(segments)} segments with overlap and padding")
+        logger.info(f"Sample segment timing: Original vs Padded")
+        if segments:
+            for i, (file, orig_start, orig_end, pad_start, pad_end) in enumerate(segments[:3]):
+                logger.info(f"  Segment {i}: {orig_start/1000:.1f}s-{orig_end/1000:.1f}s (padded: {pad_start/1000:.1f}s-{pad_end/1000:.1f}s)")
         return segments
     
     def transcribe_with_enhanced_options(self, segment_file: str) -> Dict[str, Any]:
@@ -485,27 +491,32 @@ class EnhancedAudioTranscriber:
         results = []
         
         for i, segment_info in enumerate(tqdm.tqdm(segments, desc="Enhanced transcription")):
-            segment_file, start_time_ms, end_time_ms = segment_info
+            segment_file, original_start_ms, original_end_ms, padded_start_ms, padded_end_ms = segment_info
             
             try:
                 # Transcribe with enhanced options
                 whisper_result = self.transcribe_with_enhanced_options(segment_file)
                 
-                # Validate and enhance result
-                enhanced_result = self.validate_transcription_segment(whisper_result, segment_info)
+                # Validate and enhance result (pass padded timing for validation)
+                padded_segment_info = (segment_file, padded_start_ms, padded_end_ms)
+                enhanced_result = self.validate_transcription_segment(whisper_result, padded_segment_info)
                 
+                # Use ORIGINAL timing for final output, not padded timing
                 segment_result = {
                     "segment_id": i,
                     "text": enhanced_result["text"],
                     "confidence": enhanced_result["confidence"],
                     "quality_score": enhanced_result["quality_score"],
                     "warnings": enhanced_result["warnings"],
-                    "start_time": start_time_ms,
-                    "end_time": end_time_ms,
-                    "duration": end_time_ms - start_time_ms,
+                    "start_time": original_start_ms,  # CRITICAL: Use original speech timing
+                    "end_time": original_end_ms,      # CRITICAL: Use original speech timing
+                    "duration": original_end_ms - original_start_ms,
                     "words_per_minute": enhanced_result["words_per_minute"],
                     "segment_file": segment_file,
-                    "language_detected": whisper_result.get("language", self.language)
+                    "language_detected": whisper_result.get("language", self.language),
+                    # Keep padding info for debugging
+                    "original_timing": {"start": original_start_ms, "end": original_end_ms},
+                    "padded_timing": {"start": padded_start_ms, "end": padded_end_ms}
                 }
                 
                 results.append(segment_result)
@@ -520,8 +531,8 @@ class EnhancedAudioTranscriber:
                     "segment_id": i,
                     "text": "",
                     "error": str(e),
-                    "start_time": start_time_ms,
-                    "end_time": end_time_ms,
+                    "start_time": original_start_ms,
+                    "end_time": original_end_ms,
                     "segment_file": segment_file
                 }
                 results.append(error_result)
@@ -611,14 +622,23 @@ class EnhancedAudioTranscriber:
                 next_text = next_segment.get("text", "").strip()
                 
                 if not next_segment.get("error") and next_text:
-                    # Merge segments
+                    # Merge segments - CRITICAL: Preserve original timing properly
                     merged_text = f"{current_text} {next_text}".strip()
                     merged_segment = current.copy()
+                    
+                    # Merge original timing as well
+                    current_orig = current.get("original_timing", {"start": current["start_time"], "end": current["end_time"]})
+                    next_orig = next_segment.get("original_timing", {"start": next_segment["start_time"], "end": next_segment["end_time"]})
+                    
                     merged_segment.update({
                         "text": merged_text,
-                        "end_time": next_segment.get("end_time", current["end_time"]),
-                        "duration": next_segment.get("end_time", current["end_time"]) - current["start_time"],
-                        "merged_from": [current["segment_id"], next_segment["segment_id"]]
+                        "end_time": next_orig["end"],  # Use original timing, not processed timing
+                        "duration": next_orig["end"] - current_orig["start"],
+                        "merged_from": [current["segment_id"], next_segment["segment_id"]],
+                        "original_timing": {
+                            "start": current_orig["start"],
+                            "end": next_orig["end"]
+                        }
                     })
                     
                     processed.append(merged_segment)
@@ -631,3 +651,29 @@ class EnhancedAudioTranscriber:
         
         logger.info(f"Post-processing: {len(results)} -> {len(processed)} segments")
         return processed
+    
+    def transcribe_audio_file(self, audio_file: str) -> Dict[str, Any]:
+        """
+        Standard transcribe_audio_file method that uses enhanced transcription.
+        This preserves original speech timing while using enhanced processing.
+        
+        Args:
+            audio_file: Path to audio file
+            
+        Returns:
+            Transcription result with original timing preserved
+        """
+        logger.info("Using Enhanced Transcriber with Original Timing Preservation")
+        result = self.transcribe_audio_file_enhanced(audio_file)
+        
+        # Log timing preservation info
+        if result.get("segments"):
+            logger.info("Timing preservation status:")
+            for i, segment in enumerate(result["segments"][:3]):  # Show first 3 as example
+                if "original_timing" in segment and "padded_timing" in segment:
+                    orig = segment["original_timing"]
+                    padded = segment["padded_timing"]
+                    logger.info(f"  Segment {i}: Speech {orig['start']/1000:.1f}s-{orig['end']/1000:.1f}s, "
+                              f"Processed {padded['start']/1000:.1f}s-{padded['end']/1000:.1f}s")
+        
+        return result

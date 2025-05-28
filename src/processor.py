@@ -155,12 +155,16 @@ class StudyMaterialProcessor:
             else:
                 transcription_result = self.transcriber.transcribe_audio_file(audio_path)
             
-            # Step 3: Extract screenshots (if enabled)
+            # Step 3: Extract screenshots (if enabled and if it's a video file)
             screenshots = []
-            if self.config['output'].get('extract_screenshots', True):
+            is_video_file = self._is_video_file(video_path)
+            
+            if self.config['output'].get('extract_screenshots', True) and is_video_file:
                 logger.info("Step 3/5: Extracting screenshots...")
                 screenshots_dir = video_output_dir / "screenshots"
                 screenshots = self.screenshot_extractor.extract_screenshots(video_path, str(screenshots_dir))
+            elif not is_video_file:
+                logger.info("Step 3/5: Skipping screenshot extraction (audio-only file)")
             else:
                 logger.info("Step 3/5: Screenshot extraction disabled")
             
@@ -443,3 +447,40 @@ class StudyMaterialProcessor:
             validation_results["warnings"].append("PDF matcher not initialized (no studies directory set)")
         
         return validation_results
+    
+    def _is_video_file(self, file_path: str) -> bool:
+        """
+        Check if the file is a video file or audio-only file.
+        
+        Args:
+            file_path: Path to the file
+            
+        Returns:
+            True if it's a video file with video streams, False if audio-only
+        """
+        import mimetypes
+        
+        # Get file extension and mime type
+        file_extension = Path(file_path).suffix.lower()
+        mime_type, _ = mimetypes.guess_type(file_path)
+        
+        # Check for common audio-only extensions
+        audio_extensions = {'.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a', '.wma'}
+        if file_extension in audio_extensions:
+            return False
+        
+        # Check for common video extensions
+        video_extensions = {'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'}
+        if file_extension in video_extensions:
+            return True
+        
+        # Check mime type if extension is ambiguous
+        if mime_type:
+            if mime_type.startswith('audio/'):
+                return False
+            elif mime_type.startswith('video/'):
+                return True
+        
+        # Default to video for unknown types (will fail gracefully in OpenCV)
+        logger.warning(f"Unknown file type for {file_path}, treating as video")
+        return True
