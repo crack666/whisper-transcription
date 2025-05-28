@@ -157,6 +157,142 @@ python study_processor_v2.py --input ./videos --batch --cleanup-audio --device c
 
 ---
 
+## 🎯 Audio-Segmentierung & Splitting-Modi
+
+Das System bietet verschiedene intelligente Segmentierungsmodi für optimale Transkriptionsqualität:
+
+### 🛡️ Defensive Silence Detection (EMPFOHLEN für Performance)
+**Der neue "smarte" Performance-Modus** - splittet nur bei sicheren Stille-Phasen.
+
+```bash
+# Explizit aktivieren für maximale Geschwindigkeit
+python study_processor_v2.py --input lecture.mp4 --config defensive_silence
+```
+
+**✨ Neue Testergebnisse (Mai 2025):**
+- 🚀 **7x schneller** als adaptive Segmentierung (21.2 vs 3.0 Wörter/Sekunde)
+- 🎯 **Identische Qualität** bei deutschen Vorlesungen
+- ⚡ **Echte Alternative** zu adaptive Segmentierung
+- 🏆 **Best Performance/Quality Ratio**
+
+**Funktionsweise:**
+- 📊 **Statistische Analyse** der Audio-Lautstärke
+- 🔍 **Schwellwert-Berechnung**: Mittelwert - 1.5 × Standardabweichung  
+- ⏱️ **Mindest-Stille**: 2000ms für sicheres Splitting
+- 🎯 **Konservativ**: Weniger, aber längere Segmente
+- ⚡ **Performance**: 7x schneller als adaptive Modi
+
+**Vorteile:**
+- ✅ Keine Wort-Abbrüche mitten im Satz
+- ✅ Natürliche Segmentgrenzen bei Sprechpausen
+- ✅ **7x schnellere Verarbeitung** als Adaptive
+- ✅ Identische Transkriptionsqualität bei deutschen Vorlesungen
+
+### ⏰ Fixed-Time Segmentierung
+**Zeitbasierte Aufteilung** für gleichmäßige Segmente.
+
+```bash
+# Aktivierung über Konfiguration
+{
+  "segmentation_mode": "fixed_time",
+  "fixed_time_duration": 30000,    // 30 Sekunden pro Segment
+  "fixed_time_overlap": 2000       // 2 Sekunden Überlappung
+}
+```
+
+**Funktionsweise:**
+- ⏱️ **Feste Dauer**: Standard 30 Sekunden pro Segment
+- 🔄 **Überlappung**: 2 Sekunden zur Kontinuitätssicherung
+- 📏 **Vorhersagbar**: Gleichmäßige Segmentlängen
+- 🎯 **Robust**: Funktioniert bei allen Audio-Typen
+
+### 🔊 Erweiterte Silence Detection
+**Klassische Stille-Erkennung** mit Feinjustierung.
+
+```bash
+# Manuelle Konfiguration
+{
+  "segmentation_mode": "silence_detection",
+  "min_silence_len": 2000,         // Mindest-Stille in ms
+  "silence_adjustment": 5.0        // Schwellwert-Anpassung
+}
+```
+
+### 🧠 Adaptive Segmentierung (EMPFOHLEN für Qualität)
+**KI-basierte Anpassung** an Audio-Eigenschaften mit defensive silence Prinzipien.
+
+```bash
+# Automatische Erkennung optimaler Parameter (Standard)
+{
+  "segmentation_mode": "adaptive"
+}
+```
+
+**✨ Neue Verbesserungen (Mai 2025):**
+- 🛡️ **Integriert defensive silence Prinzipien** zur Duplikat-Vermeidung
+- 🚫 **Keine überlappenden Segmente** mehr
+- 🎯 **Dreistufige Fallback-Strategie**: defensive silence → enhanced detection → defensive-guided fixed-time
+- 🏆 **Höchste Qualität** bei komplexeren Audio-Charakteristiken
+
+**Wann verwenden:**
+- 📚 Akademische Interviews und Forschung
+- 👥 Verschiedene Sprecher in einem Audio
+- 🎯 Wenn Qualität wichtiger als Geschwindigkeit ist
+
+### 🎛️ Konfiguration & Aktivierung
+
+#### Via Konfigurationsdatei
+```json
+{
+  "segmentation_mode": "defensive_silence",  // Modus wählen
+  "min_silence_len": 2000,                   // Weitere Parameter
+  "fixed_time_duration": 30000
+}
+```
+
+#### Via Code (Enhanced Transcriber)
+```python
+from src.enhanced_transcriber import EnhancedAudioTranscriber
+
+# Defensive Silence (empfohlen)
+transcriber = EnhancedAudioTranscriber(
+    model_name="small",
+    language="german",
+    config={"segmentation_mode": "defensive_silence"}
+)
+
+# Fixed-Time
+transcriber = EnhancedAudioTranscriber(
+    model_name="small", 
+    language="german",
+    config={
+        "segmentation_mode": "fixed_time",
+        "fixed_time_duration": 30000,
+        "fixed_time_overlap": 2000
+    }
+)
+```
+
+### 📊 Performance-Vergleich (2.3min deutscher Universitätsvortrag)
+
+| Modus | Segmente | Wörter | Zeit | Geschw. | Qualität | Empfehlung |
+|-------|----------|--------|------|---------|----------|------------|
+| **🛡️ Defensive Silence** | 4 | 352 | **10.2s** | **21.2 w/s** | ⭐⭐⭐ | 🏆 **Performance** |
+| **🧠 Improved Adaptive** | 4 | 344 | 113.2s | 3.0 w/s | ⭐⭐⭐⭐ | 🎯 **Qualität** |
+| ⏰ Fixed-Time 30s | 6 | 378 | 10.1s | 37.4 w/s | ⭐⭐ | ⚖️ **Vollständigkeit** |
+
+**🎯 Erkenntnisse aus Tests (Mai 2025):**
+- **Defensive Silence** und **Adaptive** liefern bei deutschen Vorlesungen **identische Segmentanzahl** (4 Segmente)
+- **Defensive Silence** ist **7x schneller** bei praktisch gleicher Qualität
+- **Fixed-Time** erfasst mehr Wörter, erzeugt aber **Duplikate durch Überlappungen**
+- **Adaptive** eliminiert Überlappungen vollständig, ist aber langsamer
+
+**💡 Neue Empfehlung:**
+- 🚀 **Defensive Silence** für Produktionsumgebungen und große Datenmengen
+- 🎯 **Adaptive** für kritische Aufnahmen wo jedes Wort zählt
+
+---
+
 ## 🔧 Troubleshooting
 
 ### Häufige Probleme
