@@ -396,6 +396,11 @@ class HTMLReportGenerator:
         segments_successful = transcription.get("segments_successful", 0)
         success_rate = (segments_successful / segments_total * 100) if segments_total > 0 else 0
         
+        # Word and character count from full text
+        full_text = transcription.get("full_text", "")
+        word_count = len(full_text.split()) if full_text else 0
+        char_count = len(full_text) if full_text else 0
+        
         # Screenshot stats
         screenshot_times = [s.get("timestamp", 0) for s in screenshots]
         avg_interval = (max(screenshot_times) - min(screenshot_times)) / (len(screenshot_times) - 1) if len(screenshot_times) > 1 else 0
@@ -423,6 +428,14 @@ class HTMLReportGenerator:
                         <div class="stat-item">
                             <span class="stat-label">Erfolgsrate:</span>
                             <span class="stat-value">{success_rate:.1f}%</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Wörter:</span>
+                            <span class="stat-value">{word_count:,}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Zeichen:</span>
+                            <span class="stat-value">{char_count:,}</span>
                         </div>
                     </div>
                 </div>

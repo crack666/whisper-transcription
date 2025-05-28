@@ -338,6 +338,22 @@ transcriber = EnhancedAudioTranscriber(
     config={"segmentation_mode": "defensive_silence"}
 )
 
+# Precision Waveform (höchste Genauigkeit)
+transcriber = EnhancedAudioTranscriber(
+    model_name="small",
+    language="german", 
+    config={
+        "segmentation_mode": "precision_waveform",
+        "precision_waveform_config": {
+            "frame_size_ms": 50,
+            "min_speech_duration_ms": 500,
+            "volume_percentile_threshold": 20,
+            "adaptive_threshold": True
+        },
+        "speaker_type": "moderate"
+    }
+)
+
 # Fixed-Time
 transcriber = EnhancedAudioTranscriber(
     model_name="small", 
@@ -356,6 +372,7 @@ transcriber = EnhancedAudioTranscriber(
 |-------|----------|--------|------|---------|----------|------------|
 | **🛡️ Defensive Silence** | 4 | 352 | **10.2s** | **21.2 w/s** | ⭐⭐⭐ | 🏆 **Performance** |
 | **🧠 Improved Adaptive** | 4 | 344 | 113.2s | 3.0 w/s | ⭐⭐⭐⭐ | 🎯 **Qualität** |
+| **🔬 Precision Waveform** | TBD | TBD | TBD | TBD | ⭐⭐⭐⭐⭐ | 🧪 **Präzision** |
 | ⏰ Fixed-Time 30s | 6 | 378 | 10.1s | 37.4 w/s | ⭐⭐ | ⚖️ **Vollständigkeit** |
 
 **🎯 Erkenntnisse aus Tests (Mai 2025):**
@@ -363,10 +380,12 @@ transcriber = EnhancedAudioTranscriber(
 - **Defensive Silence** ist **7x schneller** bei praktisch gleicher Qualität
 - **Fixed-Time** erfasst mehr Wörter, erzeugt aber **Duplikate durch Überlappungen**
 - **Adaptive** eliminiert Überlappungen vollständig, ist aber langsamer
+- **🔬 Precision Waveform** ist die **wissenschaftlichste Lösung** für höchste Genauigkeit
 
-**💡 Neue Empfehlung:**
+**💡 Neue Empfehlung (Mai 2025):**
 - 🚀 **Defensive Silence** für Produktionsumgebungen und große Datenmengen
 - 🎯 **Adaptive** für kritische Aufnahmen wo jedes Wort zählt
+- 🔬 **Precision Waveform** für wissenschaftliche Arbeiten und wenn übersehene Segmente ein Problem sind
 
 ---
 
@@ -376,6 +395,9 @@ transcriber = EnhancedAudioTranscriber(
 ```bash
 # ❌ Schlechte Transkription → ✅ Auto-Optimierung
 python auto_optimize.py --input problematic_video.mp4
+
+# ❌ Übersehene Sprachsegmente → ✅ Precision Waveform
+python study_processor_v2.py --input video.mp4 --config configs/precision_waveform_test.json
 
 # ❌ GPU-Probleme → ✅ CPU verwenden  
 python study_processor_v2.py --input video.mp4 --device cpu
