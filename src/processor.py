@@ -10,7 +10,6 @@ from typing import Dict, List, Optional, Any
 from pathlib import Path
 from datetime import datetime
 
-from .transcriber import AudioTranscriber
 from .enhanced_transcriber import EnhancedAudioTranscriber
 from .video_processor import VideoScreenshotExtractor
 from .pdf_matcher import PDFMatcher
@@ -41,23 +40,13 @@ class StudyMaterialProcessor:
         """
         self.config = self._merge_config(config)
         
-        # Initialize components - use enhanced transcriber by default
-        use_enhanced = self.config.get('use_enhanced_transcriber', True)
-        
-        if use_enhanced:
-            self.transcriber = EnhancedAudioTranscriber(
-                model_name=self.config['transcription']['model'],
-                language=self.config['transcription']['language'],
-                device=self.config['transcription']['device'],
-                config=self.config['transcription']
-            )
-        else:
-            self.transcriber = AudioTranscriber(
-                model_name=self.config['transcription']['model'],
-                language=self.config['transcription']['language'],
-                device=self.config['transcription']['device'],
-                config=self.config['transcription']
-            )
+        # Initialize components - always use EnhancedAudioTranscriber
+        self.transcriber = EnhancedAudioTranscriber(
+            model_name=self.config['transcription']['model'],
+            language=self.config['transcription']['language'],
+            device=self.config['transcription']['device'],
+            config=self.config['transcription']
+        )
         
         self.screenshot_extractor = VideoScreenshotExtractor(
             similarity_threshold=self.config['screenshots']['similarity_threshold'],
@@ -148,12 +137,9 @@ class StudyMaterialProcessor:
             logger.info("Step 1/5: Extracting audio from video...")
             audio_path = extract_audio_from_video(video_path)
             
-            # Step 2: Transcribe audio (use enhanced method if available)
+            # Step 2: Transcribe audio
             logger.info("Step 2/5: Transcribing audio...")
-            if hasattr(self.transcriber, 'transcribe_audio_file_enhanced'):
-                transcription_result = self.transcriber.transcribe_audio_file_enhanced(audio_path)
-            else:
-                transcription_result = self.transcriber.transcribe_audio_file(audio_path)
+            transcription_result = self.transcriber.transcribe_audio_file(audio_path)
             
             # Step 3: Extract screenshots (if enabled and if it's a video file)
             screenshots = []

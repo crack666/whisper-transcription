@@ -64,41 +64,42 @@ class EnhancedAudioTranscriber:
         if config:
             self.config.update(config)
         
-        logger.info(f"Initialized EnhancedAudioTranscriber for slow speakers")
+        logger.info(f"Initialized EnhancedAudioTranscriber") # Removed "for slow speakers" as it's more general now
     
     def _get_enhanced_config(self) -> Dict:
-        """Get enhanced configuration optimized for slow speakers."""
+        """Get enhanced configuration optimized for robust transcription."""
         return {
-            # Segmentation mode - NEW PRIMARY OPTION
-            'segmentation_mode': 'adaptive',  # Options: 'silence_detection', 'fixed_time', 'adaptive', 'defensive_silence'
+            # Segmentation mode - Options: 'fixed_time', 'defensive_silence', 'precision_waveform'
+            'segmentation_mode': 'defensive_silence', 
             'fixed_time_duration': 30000,              # 30 seconds per segment when using fixed_time mode
             'fixed_time_overlap': 3000,                # 3 seconds overlap for fixed_time segments
             
-            # More conservative silence detection
-            'min_silence_len': 2000,        # 2 seconds instead of 1
-            'padding': 1500,                # 1.5 seconds padding instead of 0.75
-            'silence_adjustment': 5.0,      # More tolerance for background noise
+            # Parameters for defensive_silence_detection and padding
+            'min_silence_len': 2000,        # 2 seconds
+            'padding': 1500,                # 1.5 seconds padding
+            'silence_adjustment': 5.0,      # Tolerance for background noise (used by older methods, review if still needed by kept ones)
             
-            # Advanced segmentation
+            # General segmentation parameters
             'max_segment_length': 240000,   # 4 minutes max per segment
-            'min_segment_length': 2000,     # 2 seconds minimum (was 10000 - too restrictive!)
-            'overlap_duration': 3000,       # 3 seconds overlap between segments
+            'min_segment_length': 2000,     # 2 seconds minimum
+            'overlap_duration': 3000,       # 3 seconds overlap for segment creation (used by create_overlapping_segments)
             
             # Quality settings
-            'enable_vad': True,             # Voice Activity Detection
-            'vad_threshold': 0.3,           # Lower threshold for quiet speech
+            'enable_vad': True,             # Voice Activity Detection (general concept)
+            'vad_threshold': 0.3,           # Lower threshold for quiet speech (used by older methods, review)
             'normalize_audio': True,        # Normalize volume levels
             
             # Whisper-specific optimizations
-            'use_beam_search': True,        # More accurate but slower
-            'best_of': 3,                   # Try 3 different approaches
-            'patience': 2.0,                # Wait longer for better results
-            'length_penalty': 0.8,          # Slightly prefer longer transcriptions
+            'use_beam_search': True,
+            'best_of': 3,
+            'patience': 2.0,
+            'length_penalty': 0.8,
             
             # Post-processing
-            'merge_short_segments': True,   # Merge segments < 5 seconds
-            'validate_transcription': True, # Quality validation
-            'cleanup_segments': True
+            'merge_short_segments': True,
+            'validate_transcription': True,
+            'cleanup_segments': True,
+            'create_waveform_visualization': False # For precision_waveform_detection
         }
     
     def load_model(self) -> None:
@@ -199,123 +200,10 @@ class EnhancedAudioTranscriber:
             "analysis_method": "robust_enhanced"
         }
         
-        logger.info(f"Speaker type: {speaker_type}")
-        logger.info(f"Speech ratio: {speech_ratio:.2f}, Quiet ratio: {quiet_ratio:.2f}")
+        # logger.info(f"Speaker type: {speaker_type}")
+        # logger.info(f"Speech ratio: {speech_ratio:.2f}, Quiet ratio: {quiet_ratio:.2f}")
         
         return analysis
-    
-    def enhanced_silence_detection(self, audio: AudioSegment, analysis: Dict) -> List[Tuple[int, int]]:
-        """
-        Enhanced silence detection optimized for slow speakers.
-        
-        Args:
-            audio: AudioSegment object
-            analysis: Speech pattern analysis results
-            
-        Returns:
-            List of (start, end) tuples for non-silent segments
-        """
-        # Use configured parameters, but consider analysis recommendations
-        configured_silence_len = self.config.get('min_silence_len', 2000)
-        recommended_silence_len = analysis["recommended_min_silence_len"]
-        
-        # Use the more conservative (longer) of the two
-        min_silence_len = max(configured_silence_len, recommended_silence_len)
-        
-        # Use analysis mean volume with configured adjustment
-        base_volume = analysis["mean_volume_db"]
-        silence_thresh = base_volume + self.config['silence_adjustment']
-        
-        logger.info(f"Using adaptive silence detection: {min_silence_len}ms silence, {silence_thresh:.1f}dB threshold")
-        
-        # First pass: standard detection
-        nonsilent_ranges = silence.detect_nonsilent(
-            audio, 
-            min_silence_len=min_silence_len, 
-            silence_thresh=silence_thresh
-        )
-        
-        if not nonsilent_ranges:
-            logger.warning("No speech detected with adaptive parameters, using fallback")
-            
-            # Multiple fallback strategies with increasing aggressiveness
-            fallback_configs = [
-                {"min_silence_len": 1000, "thresh_adj": 3.0},   # Standard
-                {"min_silence_len": 500, "thresh_adj": 5.0},    # More sensitive
-                {"min_silence_len": 100, "thresh_adj": 2.0},    # Very aggressive
-                {"min_silence_len": 2000, "thresh_adj": 15.0},  # Very tolerant volume
-                {"min_silence_len": 50, "thresh_adj": 1.0},     # Ultra aggressive
-            ]
-            
-            for i, config in enumerate(fallback_configs):
-                try:
-                    fallback_thresh = base_volume + config["thresh_adj"]
-                    logger.info(f"Fallback {i+1}: {config['min_silence_len']}ms, {fallback_thresh:.1f}dB")
-                    
-                    nonsilent_ranges = silence.detect_nonsilent(
-                        audio,
-                        min_silence_len=config["min_silence_len"],
-                        silence_thresh=fallback_thresh
-                    )
-                    
-                    if nonsilent_ranges:
-                        logger.info(f"Fallback {i+1} successful: {len(nonsilent_ranges)} segments")
-                        break
-                except Exception as e:
-                    logger.warning(f"Fallback {i+1} failed: {e}")
-                    continue
-            
-            # Final fallback: force segment creation if all else fails
-            if not nonsilent_ranges:
-                logger.warning("All fallbacks failed, using fixed-time segmentation")
-                # Create segments of 30-second intervals for comprehensive coverage
-                segment_duration = 30000  # 30 seconds in ms
-                nonsilent_ranges = []
-                for start_ms in range(0, len(audio), segment_duration):
-                    end_ms = min(start_ms + segment_duration, len(audio))
-                    if end_ms - start_ms > 5000:  # At least 5 seconds
-                        nonsilent_ranges.append((start_ms, end_ms))
-                logger.info(f"Created {len(nonsilent_ranges)} fixed-time segments of {segment_duration/1000}s each")
-        
-        # Second pass: merge segments that are too close together
-        merged_ranges = []
-        min_gap = min_silence_len  # Minimum gap between segments
-        
-        for start, end in nonsilent_ranges:
-            if merged_ranges and start - merged_ranges[-1][1] < min_gap:
-                # Merge with previous segment
-                merged_ranges[-1] = (merged_ranges[-1][0], end)
-            else:
-                merged_ranges.append((start, end))
-        
-        
-        # **CRITICAL FIX**: Check speech coverage and use fixed-time if too low
-        total_audio_duration = len(audio)
-        total_speech_duration = sum(end - start for start, end in merged_ranges)
-        speech_coverage = (total_speech_duration / total_audio_duration) * 100
-        
-        logger.info(f"Speech coverage: {speech_coverage:.1f}% ({total_speech_duration/1000:.1f}s / {total_audio_duration/1000:.1f}s)")
-        
-        # If speech coverage is suspiciously low, override with fixed-time segmentation
-        MIN_EXPECTED_COVERAGE = 40  # Expect at least 40% speech in most audio files
-        if speech_coverage < MIN_EXPECTED_COVERAGE:
-            logger.warning(f"Speech coverage {speech_coverage:.1f}% is too low (< {MIN_EXPECTED_COVERAGE}%), "
-                          f"switching to fixed-time segmentation for complete coverage")
-            
-            # Create comprehensive fixed-time segments
-            segment_duration = 25000  # 25 seconds for good balance
-            fixed_ranges = []
-            for start_ms in range(0, len(audio), segment_duration):
-                end_ms = min(start_ms + segment_duration, len(audio))
-                if end_ms - start_ms > 5000:  # At least 5 seconds
-                    fixed_ranges.append((start_ms, end_ms))
-            
-            merged_ranges = fixed_ranges
-            new_coverage = sum(end - start for start, end in merged_ranges) / total_audio_duration * 100
-            logger.info(f"Fixed-time segmentation: {len(merged_ranges)} segments, {new_coverage:.1f}% coverage")
-        
-        logger.info(f"Final result: {len(merged_ranges)} segments")
-        return merged_ranges
     
     def fixed_time_segmentation(self, audio: AudioSegment) -> List[Tuple[int, int]]:
         """
@@ -725,34 +613,27 @@ class EnhancedAudioTranscriber:
         analysis = self.analyze_speech_patterns(audio_file)
         
         # Step 2: Choose segmentation method based on configuration
-        segmentation_mode = self.config.get('segmentation_mode', 'silence_detection')
+        # Default to 'defensive_silence' if not specified or invalid
+        segmentation_mode = self.config.get('segmentation_mode', 'defensive_silence')
         audio = AudioSegment.from_file(audio_file)
         
         logger.info(f"Using segmentation mode: {segmentation_mode}")
         
         if segmentation_mode == 'fixed_time':
-            # Use fixed-time segmentation as primary method
             nonsilent_ranges = self.fixed_time_segmentation(audio)
             logger.info(f"Fixed-time segmentation: {len(nonsilent_ranges)} segments")
-        
         elif segmentation_mode == 'defensive_silence':
-            # Use defensive silence detection - only split on confident silence
             nonsilent_ranges = self.defensive_silence_detection(audio, analysis)
             logger.info(f"Defensive silence detection: {len(nonsilent_ranges)} segments")
-        
         elif segmentation_mode == 'precision_waveform':
-            # Use scientific waveform analysis for maximum precision
             nonsilent_ranges = self.precision_waveform_detection(audio, analysis)
             logger.info(f"Precision waveform detection: {len(nonsilent_ranges)} segments")
-        
-        elif segmentation_mode == 'adaptive':
-            # Use improved adaptive strategy with defensive silence principles
-            nonsilent_ranges = self.adaptive_silence_detection(audio, analysis)
-            logger.info(f"Adaptive segmentation: {len(nonsilent_ranges)} segments")
-        
-        else:  # 'silence_detection' (default)
-            # Use enhanced silence detection
-            nonsilent_ranges = self.enhanced_silence_detection(audio, analysis)
+        else:
+            logger.warning(f"Unsupported segmentation_mode '{segmentation_mode}' specified in config. "
+                           f"Falling back to default 'defensive_silence'.")
+            segmentation_mode = 'defensive_silence' # Explicitly set for clarity and for Step 3
+            nonsilent_ranges = self.defensive_silence_detection(audio, analysis)
+            logger.info(f"Defensive silence detection (fallback): {len(nonsilent_ranges)} segments")
         
         if not nonsilent_ranges:
             logger.error("No speech detected in audio file")
@@ -765,14 +646,19 @@ class EnhancedAudioTranscriber:
             }
         
         # Step 3: Create segments (with or without overlap based on mode)
-        segmentation_mode = self.config.get('segmentation_mode', 'silence_detection')
+        # segmentation_mode should be one of the valid modes at this point due to the fallback logic above.
         
-        if segmentation_mode in ['adaptive', 'defensive_silence', 'precision_waveform']:
-            # For adaptive, defensive_silence, and precision_waveform modes, use non-overlapping segments to prevent duplicates
+        if segmentation_mode in ['defensive_silence', 'precision_waveform']:
+            # For defensive_silence and precision_waveform modes, use non-overlapping segments to prevent duplicates
             segments = self.create_non_overlapping_segments(audio_file, nonsilent_ranges, analysis)
-        else:
-            # For other modes, use overlapping segments (existing behavior)
+        elif segmentation_mode == 'fixed_time':
+            # For fixed_time, use overlapping segments as it's inherent to the method
             segments = self.create_overlapping_segments(audio_file, nonsilent_ranges, analysis)
+        else:
+            # This case should ideally not be reached.
+            logger.error(f"Internal logic error: Unhandled segmentation_mode '{segmentation_mode}' "
+                         f"for choosing segment creation type. Defaulting to non-overlapping for safety.")
+            segments = self.create_non_overlapping_segments(audio_file, nonsilent_ranges, analysis)
         
         if not segments:
             logger.error("No valid segments created")
@@ -965,14 +851,14 @@ class EnhancedAudioTranscriber:
         result = self.transcribe_audio_file_enhanced(audio_file)
         
         # Log timing preservation info
-        if result.get("segments"):
-            logger.info("Timing preservation status:")
-            for i, segment in enumerate(result["segments"][:3]):  # Show first 3 as example
-                if "original_timing" in segment and "padded_timing" in segment:
-                    orig = segment["original_timing"]
-                    padded = segment["padded_timing"]
-                    logger.info(f"  Segment {i}: Speech {orig['start']/1000:.1f}s-{orig['end']/1000:.1f}s, "
-                              f"Processed {padded['start']/1000:.1f}s-{padded['end']/1000:.1f}s")
+        # if result.get("segments"):
+        #     logger.info("Timing preservation status:")
+        #     for i, segment in enumerate(result["segments"][:3]):  # Show first 3 as example
+        #         if "original_timing" in segment and "padded_timing" in segment:
+        #             orig = segment["original_timing"]
+        #             padded = segment["padded_timing"]
+        #             logger.info(f"  Segment {i}: Speech {orig['start']/1000:.1f}s-{orig['end']/1000:.1f}s, "
+        #                       f"Processed {padded['start']/1000:.1f}s-{padded['end']/1000:.1f}s")
         
         return result
     
@@ -1094,169 +980,6 @@ class EnhancedAudioTranscriber:
         
         return speech_segments
 
-    def adaptive_silence_detection(self, audio: AudioSegment, analysis: Dict) -> List[Tuple[int, int]]:
-        """
-        Adaptive silence detection that combines defensive silence principles with speaker adaptation.
-        Uses defensive silence detection as base, with fallback strategies.
-        
-        Args:
-            audio: Audio segment to analyze
-            analysis: Speech pattern analysis results
-            
-        Returns:
-            List of speech segment ranges (start_ms, end_ms)
-        """
-        logger.info("🔄 Starting adaptive silence detection with defensive principles...")
-        
-        # Start with defensive silence detection as the primary strategy
-        speech_segments = self.defensive_silence_detection(audio, analysis)
-        
-        # Calculate coverage
-        total_audio_duration = len(audio)
-        total_speech_duration = sum(end - start for start, end in speech_segments)
-        speech_coverage = (total_speech_duration / total_audio_duration) * 100
-        
-        logger.info(f"📊 Defensive silence detection coverage: {speech_coverage:.1f}%")
-        
-        # If coverage is very low, try enhanced silence detection with speaker-adapted parameters
-        if speech_coverage < 30:  # Less than 30% coverage suggests defensive was too strict
-            logger.info("🔍 Coverage too low, trying enhanced detection with adapted parameters...")
-            
-            # Use speaker-adapted parameters for enhanced detection
-            speaker_type = analysis.get('speaker_type', 'moderate_speech')
-            
-            if speaker_type in ['very_sparse_speech', 'sparse_speech']:
-                # For sparse speakers, use very sensitive detection
-                enhanced_segments = self.enhanced_silence_detection(audio, analysis)
-                enhanced_coverage = (sum(end - start for start, end in enhanced_segments) / total_audio_duration) * 100
-                
-                logger.info(f"📊 Enhanced detection coverage: {enhanced_coverage:.1f}%")
-                
-                # Use enhanced if it provides reasonable coverage without being too aggressive
-                if enhanced_coverage > speech_coverage and enhanced_coverage <= 85:  # Not too aggressive
-                    logger.info("✅ Using enhanced detection results")
-                    speech_segments = enhanced_segments
-                    speech_coverage = enhanced_coverage
-        
-        # If still low coverage, use defensive-guided fixed-time as final fallback
-        if speech_coverage < 25:  # Very low coverage
-            logger.warning(f"🚨 Coverage still too low ({speech_coverage:.1f}%), using defensive-guided fixed-time")
-            
-            # Use fixed-time but with defensive silence guidance for better boundaries
-            fixed_segments = self.defensive_guided_fixed_time(audio, analysis, speech_segments)
-            final_coverage = (sum(end - start for start, end in fixed_segments) / total_audio_duration) * 100
-            
-            logger.info(f"📊 Defensive-guided fixed-time coverage: {final_coverage:.1f}%")
-            speech_segments = fixed_segments
-            speech_coverage = final_coverage
-        
-        # Remove overlapping segments to prevent duplicates (key improvement over old adaptive)
-        speech_segments = self.remove_overlapping_segments(speech_segments)
-        
-        # Final validation - ensure we have reasonable coverage
-        final_speech_duration = sum(end - start for start, end in speech_segments)
-        final_coverage = (final_speech_duration / total_audio_duration) * 100
-        
-        logger.info(f"🎯 Adaptive detection final results:")
-        logger.info(f"   Segments: {len(speech_segments)}")
-        logger.info(f"   Coverage: {final_coverage:.1f}%")
-        logger.info(f"   Strategy: {'defensive' if speech_coverage >= 30 else 'enhanced/guided-fixed'}")
-        
-        return speech_segments
-
-    def defensive_guided_fixed_time(self, audio: AudioSegment, analysis: Dict, 
-                                  defensive_segments: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
-        """
-        Create fixed-time segments but use defensive silence detections as boundary guidance.
-        
-        Args:
-            audio: Audio segment to process
-            analysis: Speech analysis results
-            defensive_segments: Results from defensive silence detection for boundary guidance
-            
-        Returns:
-            List of guided fixed-time segments
-        """
-        logger.info("🎯 Creating defensive-guided fixed-time segments...")
-        
-        # Get defensive silence boundaries for guidance
-        silence_boundaries = set()
-        for start, end in defensive_segments:
-            silence_boundaries.add(start)
-            silence_boundaries.add(end)
-        
-        # Add audio start and end
-        silence_boundaries.add(0)
-        silence_boundaries.add(len(audio))
-        
-        # Sort boundaries
-        boundaries = sorted(silence_boundaries)
-        
-        # Create segments using a target duration but respecting silence boundaries
-        target_duration = 25000  # 25 seconds target
-        min_segment_duration = 5000  # 5 seconds minimum
-        
-        segments = []
-        current_start = 0
-        
-        for boundary in boundaries[1:]:  # Skip first boundary (0)
-            segment_duration = boundary - current_start
-            
-            # If segment is too short, try to extend to next boundary
-            if segment_duration < min_segment_duration and boundary < len(audio):
-                continue
-                
-            # If segment is reasonable or we're at the end, create it
-            if segment_duration >= min_segment_duration:
-                segments.append((current_start, boundary))
-                current_start = boundary
-        
-        # Ensure we capture any remaining audio
-        if current_start < len(audio) - 1000:  # At least 1 second remaining
-            segments.append((current_start, len(audio)))
-        
-        logger.info(f"📋 Created {len(segments)} defensive-guided segments")
-        return segments
-
-    def remove_overlapping_segments(self, segments: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
-        """
-        Remove overlapping segments to prevent duplicate transcriptions.
-        Key improvement over old adaptive mode.
-        
-        Args:
-            segments: List of (start_ms, end_ms) tuples
-            
-        Returns:
-            List of non-overlapping segments
-        """
-        if not segments:
-            return segments
-            
-        # Sort by start time
-        sorted_segments = sorted(segments, key=lambda x: x[0])
-        
-        non_overlapping = []
-        current_start, current_end = sorted_segments[0]
-        
-        for start, end in sorted_segments[1:]:
-            if start >= current_end:
-                # No overlap, add current segment and move to next
-                non_overlapping.append((current_start, current_end))
-                current_start, current_end = start, end
-            else:
-                # Overlap detected, merge segments
-                current_end = max(current_end, end)
-                logger.debug(f"Merged overlapping segments: {start/1000:.1f}s-{end/1000:.1f}s")
-        
-        # Add the last segment
-        non_overlapping.append((current_start, current_end))
-        
-        overlap_removed = len(segments) - len(non_overlapping)
-        if overlap_removed > 0:
-            logger.info(f"🔧 Removed {overlap_removed} overlapping segments")
-        
-        return non_overlapping
-    
     def precision_waveform_detection(self, audio: AudioSegment, analysis: Dict) -> List[Tuple[int, int]]:
         """
         Use scientific waveform analysis for precise speech segmentation.

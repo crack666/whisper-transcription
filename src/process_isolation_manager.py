@@ -25,9 +25,7 @@ except ImportError:
     torch = None
 
 from .audio_profile_analyzer import AudioProfile, OptimizationResult
-from .transcriber import AudioTranscriber
 from .enhanced_transcriber import EnhancedAudioTranscriber
-from .robust_transcriber import RobustAudioTranscriber
 
 class ProcessIsolationManager:
     """Manages isolated process execution for transcription testing."""
@@ -350,18 +348,13 @@ class ProcessIsolationManager:
         Returns:
             Configured transcriber instance
         """
-        transcriber_type = config.get('transcriber', 'standard')
         model_name = config.get('model', 'large-v3')
         
         # Merge configurations
         full_config = {**config, **transcriber_config}
         
-        if transcriber_type == 'enhanced':
-            return EnhancedAudioTranscriber(model_name=model_name, config=full_config)
-        elif transcriber_type == 'robust':
-            return RobustAudioTranscriber(model_name=model_name, config=full_config)
-        else:
-            return AudioTranscriber(model_name=model_name, config=full_config)
+        # Always use EnhancedAudioTranscriber
+        return EnhancedAudioTranscriber(model_name=model_name, config=full_config)
     
     def _validate_transcription_quality(self, transcript: str, segments: list, audio_profile: AudioProfile) -> bool:
         """
