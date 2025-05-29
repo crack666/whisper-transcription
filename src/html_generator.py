@@ -50,1086 +50,645 @@ class HTMLReportGenerator:
         
         logger.info(f"HTML report saved to: {output_path}")
     
-    def _generate_html_document(self, results: Dict) -> str:
+    def _generate_html_document(self, results: List[Dict]) -> str: # Changed results type to List[Dict] for clarity
         """
-        Generate complete HTML document.
+        Generate complete HTML document with a file selector and dynamic content area.
         
         Args:
-            results: Analysis results
+            results: A list of analysis results for multiple files.
             
         Returns:
             Complete HTML document as string
         """
-        video_name = Path(results.get("video_path", "Unknown")).stem
+        if not isinstance(results, list) or not results:
+            logger.error("Invalid or empty results provided. Expected a list of analysis dicts.")
+            # Return a minimal HTML page indicating the error
+            return '''
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Error</title></head>
+<body><p>Error: No analysis data to display or data is in an invalid format.</p></body></html>
+'''
+
+        first_result_data = results[0]
         
-        # Generate individual sections
-        header_html = self._generate_header(results, video_name)
-        navigation_html = self._generate_navigation()
-        transcript_html = self._generate_transcript_section(results.get("transcription", {}))
-        screenshots_html = self._generate_screenshots_section(results.get("screenshots", []))
-        pdfs_html = self._generate_pdfs_section(results.get("related_pdfs", []))
-        mapping_html = self._generate_mapping_section(results.get("screenshot_transcript_mapping", []))
-        statistics_html = self._generate_statistics_section(results)
-        
-        # Generate CSS and JavaScript
-        css = self._generate_css()
-        javascript = self._generate_javascript()
-        
-        return f"""<!DOCTYPE html>
-<html lang="de">
+        report_title_base = "Transcription Analysis Report"
+        try:
+            audio_path = first_result_data.get("audio_file_path")
+            if audio_path:
+                report_title_base = Path(audio_path).stem
+            elif first_result_data.get("error"):
+                 # Use a simpler way to construct the f-string for error titles
+                 file_name_for_error = Path(first_result_data.get("audio_file_path", "Unknown File")).name
+                 report_title_base = f"Error processing: {file_name_for_error}"
+        except Exception as e:
+            logger.warning(f"Could not determine report title from first file: {e}")
+            # report_title_base remains "Transcription Analysis Report"
+
+        return f'''
+<!DOCTYPE html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Studienanalyse: {video_name}</title>
-    <style>{css}</style>
-</head>
-<body>
-    <div class="container">
-        {header_html}
-        {navigation_html}
-        
-        <div id="transcript" class="tab-content active">
-            {transcript_html}
-        </div>
-        
-        <div id="screenshots" class="tab-content">
-            {screenshots_html}
-        </div>
-        
-        <div id="pdfs" class="tab-content">
-            {pdfs_html}
-        </div>
-        
-        <div id="mapping" class="tab-content">
-            {mapping_html}
-        </div>
-        
-        <div id="statistics" class="tab-content">
-            {statistics_html}
-        </div>
-    </div>
-    
-    <script>{javascript}</script>
-</body>
-</html>"""
-    
-    def _generate_header(self, results: Dict, video_name: str) -> str:
-        """Generate header section with video information."""
-        transcription = results.get("transcription", {})
-        duration = transcription.get("total_duration", 0) / 1000 / 60  # Convert to minutes
-        
-        return f"""
-        <div class="header">
-            <h1>📚 Studienanalyse: {video_name}</h1>
-            <div class="header-info">
-                <div class="info-grid">
-                    <div class="info-item">
-                        <span class="info-label">📅 Verarbeitet:</span>
-                        <span class="info-value">{results.get('processing_timestamp', 'N/A')}</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">🎥 Video:</span>
-                        <span class="info-value">{Path(results.get('video_path', '')).name}</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">⏱️ Dauer:</span>
-                        <span class="info-value">{duration:.1f} Minuten</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">🔤 Sprache:</span>
-                        <span class="info-value">{transcription.get('language', 'N/A')}</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">📸 Screenshots:</span>
-                        <span class="info-value">{len(results.get('screenshots', []))}</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">📄 PDFs:</span>
-                        <span class="info-value">{len(results.get('related_pdfs', []))}</span>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="search-container">
-                <input type="text" id="searchInput" placeholder="🔍 Durchsuchen Sie Transkript, Screenshots und PDFs..." autocomplete="off">
-                <div class="search-stats" id="searchStats"></div>
-            </div>
-        </div>
-        """
-    
-    def _generate_navigation(self) -> str:
-        """Generate navigation tabs."""
-        return """
-        <div class="tabs">
-            <div class="tab active" onclick="showTab('transcript')" data-tab="transcript">
-                📝 Transkript
-            </div>
-            <div class="tab" onclick="showTab('screenshots')" data-tab="screenshots">
-                📸 Screenshots
-            </div>
-            <div class="tab" onclick="showTab('pdfs')" data-tab="pdfs">
-                📄 PDFs
-            </div>
-            <div class="tab" onclick="showTab('mapping')" data-tab="mapping">
-                🔗 Zuordnung
-            </div>
-            <div class="tab" onclick="showTab('statistics')" data-tab="statistics">
-                📊 Statistiken
-            </div>
-        </div>
-        """
-    
-    def _generate_transcript_section(self, transcription: Dict) -> str:
-        """Generate transcript section HTML."""
-        if not transcription or not transcription.get("segments"):
-            return """
-            <div class="section">
-                <h2>📝 Transkript</h2>
-                <div class="empty-state">
-                    <p>Kein Transkript verfügbar.</p>
-                </div>
-            </div>
-            """
-        
-        segments_html = []
-        for segment in transcription["segments"]:
-            start_time = segment.get("start_time", 0)
-            end_time = segment.get("end_time", 0)
-            text = segment.get("text", "").strip()
-            confidence = segment.get("confidence", 0)
-            
-            if not text:
-                continue
-            
-            start_formatted = format_timestamp_seconds(start_time / 1000)
-            end_formatted = format_timestamp_seconds(end_time / 1000)
-            
-            confidence_class = self._get_confidence_class(confidence)
-            
-            segments_html.append(f"""
-            <div class="transcript-segment" data-start="{start_time}" data-end="{end_time}">
-                <div class="segment-header">
-                    <span class="timestamp">[{start_formatted} - {end_formatted}]</span>
-                    <span class="confidence {confidence_class}">Vertrauen: {confidence:.2f}</span>
-                </div>
-                <p class="segment-text">{text}</p>
-            </div>
-            """)
-        
-        full_text = transcription.get("full_text", "")
-        word_count = len(full_text.split()) if full_text else 0
-        
-        return f"""
-        <div class="section">
-            <h2>📝 Transkript</h2>
-            <div class="section-stats">
-                <span>Segmente: {len(segments_html)}</span>
-                <span>Wörter: {word_count}</span>
-                <span>Zeichen: {len(full_text)}</span>
-            </div>
-            <div class="transcript-container">
-                {''.join(segments_html)}
-            </div>
-        </div>
-        """
-    
-    def _generate_screenshots_section(self, screenshots: List[Dict]) -> str:
-        """Generate screenshots section HTML."""
-        if not screenshots:
-            return """
-            <div class="section">
-                <h2>📸 Screenshots</h2>
-                <div class="empty-state">
-                    <p>Keine Screenshots verfügbar.</p>
-                </div>
-            </div>
-            """
-        
-        screenshots_html = []
-        for screenshot in screenshots:
-            filename = screenshot.get("filename", "")
-            timestamp = screenshot.get("timestamp_formatted", "")
-            similarity = screenshot.get("similarity_score", 1.0)
-            
-            screenshots_html.append(f"""
-            <div class="screenshot-item" data-timestamp="{screenshot.get('timestamp', 0)}">
-                <div class="screenshot-container">
-                    <img src="screenshots/{filename}" alt="Screenshot bei {timestamp}" loading="lazy">
-                    <div class="screenshot-overlay">
-                        <div class="screenshot-info">
-                            <span class="screenshot-time">🕐 {timestamp}</span>
-                            <span class="screenshot-similarity">Ähnlichkeit: {similarity:.3f}</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            """)
-        
-        return f"""
-        <div class="section">
-            <h2>📸 Screenshots</h2>
-            <div class="section-stats">
-                <span>Anzahl: {len(screenshots)}</span>
-            </div>
-            <div class="screenshots-grid">
-                {''.join(screenshots_html)}
-            </div>
-        </div>
-        """
-    
-    def _generate_pdfs_section(self, pdfs: List[Dict]) -> str:
-        """Generate PDFs section HTML."""
-        if not pdfs:
-            return """
-            <div class="section">
-                <h2>📄 Verwandte PDFs</h2>
-                <div class="empty-state">
-                    <p>Keine verwandten PDFs gefunden.</p>
-                </div>
-            </div>
-            """
-        
-        pdfs_html = []
-        for pdf in pdfs:
-            filename = pdf.get("filename", "")
-            relevance = pdf.get("relevance_score", 0)
-            preview = pdf.get("content_preview", "")
-            page_count = pdf.get("page_count", 0)
-            file_size = pdf.get("file_size_bytes", 0)
-            
-            # Format file size
-            size_mb = file_size / (1024 * 1024)
-            size_str = f"{size_mb:.1f} MB" if size_mb >= 1 else f"{file_size / 1024:.0f} KB"
-            
-            relevance_class = "high" if relevance >= 10 else "medium" if relevance >= 5 else "low"
-            
-            pdfs_html.append(f"""
-            <div class="pdf-item" data-relevance="{relevance}">
-                <div class="pdf-header">
-                    <h3 class="pdf-title">📄 {filename}</h3>
-                    <div class="pdf-metadata">
-                        <span class="relevance-score {relevance_class}">Relevanz: {relevance}</span>
-                        <span class="pdf-stats">{page_count} Seiten • {size_str}</span>
-                    </div>
-                </div>
-                <div class="pdf-preview">
-                    <h4>Vorschau:</h4>
-                    <p class="preview-text">{preview[:500]}{'...' if len(preview) > 500 else ''}</p>
-                </div>
-            </div>
-            """)
-        
-        return f"""
-        <div class="section">
-            <h2>📄 Verwandte PDFs</h2>
-            <div class="section-stats">
-                <span>Gefunden: {len(pdfs)}</span>
-                <span>Höchste Relevanz: {max([p.get('relevance_score', 0) for p in pdfs], default=0)}</span>
-            </div>
-            <div class="pdfs-container">
-                {''.join(pdfs_html)}
-            </div>
-        </div>
-        """
-    
-    def _generate_mapping_section(self, mappings: List[Dict]) -> str:
-        """Generate screenshot-transcript mapping section."""
-        if not mappings:
-            return """
-            <div class="section">
-                <h2>🔗 Screenshot-Transkript Zuordnung</h2>
-                <div class="empty-state">
-                    <p>Keine Zuordnungen verfügbar.</p>
-                </div>
-            </div>
-            """
-        
-        mappings_html = []
-        for i, mapping in enumerate(mappings):
-            screenshot = mapping.get("screenshot", {})
-            transcript = mapping.get("transcript_segment", {})
-            time_diff = mapping.get("time_difference", 0)
-            
-            screenshot_time = screenshot.get("timestamp_formatted", "")
-            screenshot_file = screenshot.get("filename", "")
-            transcript_text = transcript.get("text", "")
-            
-            mappings_html.append(f"""
-            <div class="mapping-item" data-index="{i}">
-                <div class="mapping-content">
-                    <div class="mapping-screenshot">
-                        <img src="screenshots/{screenshot_file}" alt="Screenshot" loading="lazy">
-                        <div class="mapping-screenshot-info">
-                            <span class="mapping-time">🕐 {screenshot_time}</span>
-                            <span class="time-difference">Δ {time_diff:.1f}s</span>
-                        </div>
-                    </div>
-                    <div class="mapping-transcript">
-                        <h4>📝 Entsprechender Text:</h4>
-                        <p class="mapping-text">{transcript_text}</p>
-                    </div>
-                </div>
-            </div>
-            """)
-        
-        return f"""
-        <div class="section">
-            <h2>🔗 Screenshot-Transkript Zuordnung</h2>
-            <div class="section-stats">
-                <span>Zuordnungen: {len(mappings)}</span>
-            </div>
-            <div class="mappings-container">
-                {''.join(mappings_html)}
-            </div>
-        </div>
-        """
-    
-    def _generate_statistics_section(self, results: Dict) -> str:
-        """Generate statistics section."""
-        transcription = results.get("transcription", {})
-        screenshots = results.get("screenshots", [])
-        pdfs = results.get("related_pdfs", [])
-        
-        # Transcription stats
-        processing_time = transcription.get("processing_time_seconds", 0)
-        segments_total = transcription.get("segments_total", 0)
-        segments_successful = transcription.get("segments_successful", 0)
-        success_rate = (segments_successful / segments_total * 100) if segments_total > 0 else 0
-        
-        # Word and character count from full text
-        full_text = transcription.get("full_text", "")
-        word_count = len(full_text.split()) if full_text else 0
-        char_count = len(full_text) if full_text else 0
-        
-        # Screenshot stats
-        screenshot_times = [s.get("timestamp", 0) for s in screenshots]
-        avg_interval = (max(screenshot_times) - min(screenshot_times)) / (len(screenshot_times) - 1) if len(screenshot_times) > 1 else 0
-        
-        return f"""
-        <div class="section">
-            <h2>📊 Verarbeitungsstatistiken</h2>
-            
-            <div class="stats-grid">
-                <div class="stats-card">
-                    <h3>🎙️ Transkription</h3>
-                    <div class="stats-content">
-                        <div class="stat-item">
-                            <span class="stat-label">Verarbeitungszeit:</span>
-                            <span class="stat-value">{processing_time:.1f}s</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Segmente gesamt:</span>
-                            <span class="stat-value">{segments_total}</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Erfolgreich:</span>
-                            <span class="stat-value">{segments_successful}</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Erfolgsrate:</span>
-                            <span class="stat-value">{success_rate:.1f}%</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Wörter:</span>
-                            <span class="stat-value">{word_count:,}</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Zeichen:</span>
-                            <span class="stat-value">{char_count:,}</span>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="stats-card">
-                    <h3>📸 Screenshots</h3>
-                    <div class="stats-content">
-                        <div class="stat-item">
-                            <span class="stat-label">Anzahl:</span>
-                            <span class="stat-value">{len(screenshots)}</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Durchschnittlicher Abstand:</span>
-                            <span class="stat-value">{avg_interval:.1f}s</span>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="stats-card">
-                    <h3>📄 PDFs</h3>
-                    <div class="stats-content">
-                        <div class="stat-item">
-                            <span class="stat-label">Gefunden:</span>
-                            <span class="stat-value">{len(pdfs)}</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Mit hoher Relevanz:</span>
-                            <span class="stat-value">{len([p for p in pdfs if p.get('relevance_score', 0) >= 10])}</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        """
-    
-    def _get_confidence_class(self, confidence: float) -> str:
-        """Get CSS class based on confidence score."""
-        if confidence >= 0.9:
-            return "confidence-high"
-        elif confidence >= 0.7:
-            return "confidence-medium"
-        else:
-            return "confidence-low"
-    
-    def _generate_css(self) -> str:
-        """Generate CSS styles for the HTML report."""
-        return """
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background: #f8f9fa;
-        }
-        
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
-            border-radius: 12px;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        
-        .header h1 {
-            margin-bottom: 20px;
-            font-size: 2.5em;
-        }
-        
-        .info-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 15px;
-            margin-bottom: 25px;
-        }
-        
-        .info-item {
-            display: flex;
-            justify-content: space-between;
-            background: rgba(255,255,255,0.1);
-            padding: 10px 15px;
-            border-radius: 6px;
-        }
-        
-        .info-label {
-            font-weight: 600;
-        }
-        
-        .search-container {
-            position: relative;
-        }
-        
-        .search-container input {
-            width: 100%;
-            padding: 15px 20px;
-            font-size: 16px;
-            border: none;
-            border-radius: 8px;
-            background: rgba(255,255,255,0.9);
-            backdrop-filter: blur(10px);
-        }
-        
-        .search-stats {
-            margin-top: 10px;
-            font-size: 14px;
-            color: rgba(255,255,255,0.8);
-        }
-        
-        .tabs {
-            display: flex;
-            background: white;
-            border-radius: 12px 12px 0 0;
-            overflow: hidden;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin-bottom: 0;
-        }
-        
-        .tab {
-            flex: 1;
-            padding: 15px 20px;
-            cursor: pointer;
-            background: #f8f9fa;
-            border-bottom: 3px solid transparent;
-            transition: all 0.3s ease;
-            text-align: center;
-            font-weight: 500;
-        }
-        
-        .tab:hover {
-            background: #e9ecef;
-        }
-        
-        .tab.active {
-            background: white;
-            border-bottom-color: #667eea;
-            color: #667eea;
-        }
-        
-        .tab-content {
-            display: none;
-            background: white;
-            border-radius: 0 0 12px 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        
-        .tab-content.active {
-            display: block;
-        }
-        
-        .section {
-            padding: 30px;
-        }
-        
-        .section h2 {
-            color: #2c3e50;
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #ecf0f1;
-            font-size: 1.8em;
-        }
-        
-        .section-stats {
-            margin-bottom: 20px;
-            display: flex;
-            gap: 20px;
-            color: #666;
-        }
-        
-        .section-stats span {
-            padding: 5px 12px;
-            background: #f8f9fa;
-            border-radius: 20px;
-            font-size: 14px;
-        }
-        
-        .transcript-segment {
-            margin-bottom: 20px;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 8px;
-            border-left: 4px solid #667eea;
-            transition: background 0.2s ease;
-        }
-        
-        .transcript-segment:hover {
-            background: #e9ecef;
-        }
-        
-        .segment-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        
-        .timestamp {
-            color: #667eea;
-            font-weight: bold;
-            font-family: 'Courier New', monospace;
-        }
-        
-        .confidence {
-            font-size: 12px;
-            padding: 2px 8px;
-            border-radius: 12px;
-            color: white;
-        }
-        
-        .confidence-high { background: #28a745; }
-        .confidence-medium { background: #ffc107; color: #333; }
-        .confidence-low { background: #dc3545; }
-        
-        .segment-text {
-            font-size: 16px;
-            line-height: 1.6;
-        }
-        
-        .screenshots-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-        }
-        
-        .screenshot-item {
-            position: relative;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            transition: transform 0.2s ease;
-        }
-        
-        .screenshot-item:hover {
-            transform: translateY(-2px);
-        }
-        
-        .screenshot-container {
-            position: relative;
-        }
-        
-        .screenshot-container img {
-            width: 100%;
-            height: auto;
-            display: block;
-        }
-        
-        .screenshot-overlay {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: linear-gradient(transparent, rgba(0,0,0,0.8));
-            color: white;
-            padding: 15px;
-        }
-        
-        .screenshot-info {
-            display: flex;
-            justify-content: space-between;
-            font-size: 14px;
-        }
-        
-        .pdf-item {
-            margin-bottom: 25px;
-            padding: 25px;
-            background: #fff8e1;
-            border-radius: 8px;
-            border-left: 4px solid #ffc107;
-        }
-        
-        .pdf-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 15px;
-        }
-        
-        .pdf-title {
-            color: #2c3e50;
-            margin: 0;
-        }
-        
-        .pdf-metadata {
-            display: flex;
-            gap: 15px;
-            align-items: center;
-        }
-        
-        .relevance-score {
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: bold;
-            color: white;
-        }
-        
-        .relevance-score.high { background: #28a745; }
-        .relevance-score.medium { background: #ffc107; color: #333; }
-        .relevance-score.low { background: #6c757d; }
-        
-        .pdf-stats {
-            color: #666;
-            font-size: 14px;
-        }
-        
-        .preview-text {
-            color: #555;
-            font-style: italic;
-            max-height: 100px;
-            overflow: hidden;
-        }
-        
-        .mapping-item {
-            margin-bottom: 30px;
-            padding: 25px;
-            background: #e3f2fd;
-            border-radius: 8px;
-            border-left: 4px solid #2196f3;
-        }
-        
-        .mapping-content {
-            display: grid;
-            grid-template-columns: 1fr 2fr;
-            gap: 25px;
-            align-items: start;
-        }
-        
-        .mapping-screenshot img {
-            width: 100%;
-            border-radius: 6px;
-        }
-        
-        .mapping-screenshot-info {
-            margin-top: 10px;
-            display: flex;
-            justify-content: space-between;
-            font-size: 14px;
-            color: #666;
-        }
-        
-        .mapping-transcript h4 {
-            color: #2c3e50;
-            margin-bottom: 10px;
-        }
-        
-        .mapping-text {
-            font-size: 16px;
-            line-height: 1.6;
-        }
-        
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 25px;
-        }
-        
-        .stats-card {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 25px;
-            border-left: 4px solid #667eea;
-        }
-        
-        .stats-card h3 {
-            color: #2c3e50;
-            margin-bottom: 20px;
-        }
-        
-        .stat-item {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 10px;
-            padding-bottom: 8px;
-            border-bottom: 1px solid #dee2e6;
-        }
-        
-        .stat-label {
-            color: #666;
-        }
-        
-        .stat-value {
-            font-weight: bold;
-            color: #2c3e50;
-        }
-        
-        .empty-state {
-            text-align: center;
-            color: #666;
-            font-style: italic;
-            padding: 50px;
-        }
-        
-        .highlight {
-            background-color: #ffeb3b;
-            padding: 2px 4px;
-            border-radius: 3px;
-        }
-        
-        @media (max-width: 768px) {
-            .container {
-                padding: 10px;
-            }
-            
-            .tabs {
-                flex-direction: column;
-            }
-            
-            .info-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .mapping-content {
-                grid-template-columns: 1fr;
-            }
-            
-            .stats-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-        """
-    
-    def _generate_javascript(self) -> str:
-        """Generate JavaScript for interactive functionality."""
-        return """
-        // Tab switching functionality
-        function showTab(tabName) {
-            // Hide all tab contents
-            const contents = document.getElementsByClassName('tab-content');
-            for (let content of contents) {
-                content.classList.remove('active');
-            }
-            
-            // Remove active class from all tabs
-            const tabs = document.getElementsByClassName('tab');
-            for (let tab of tabs) {
-                tab.classList.remove('active');
-            }
-            
-            // Show selected tab content
-            document.getElementById(tabName).classList.add('active');
-            
-            // Add active class to clicked tab
-            const activeTab = document.querySelector(`[data-tab="${tabName}"]`);
-            if (activeTab) {
-                activeTab.classList.add('active');
-            }
-        }
-        
-        // Search functionality
-        document.addEventListener('DOMContentLoaded', function() {
-            const searchInput = document.getElementById('searchInput');
-            const searchStats = document.getElementById('searchStats');
-            
-            if (searchInput) {
-                searchInput.addEventListener('input', function(e) {
-                    performSearch(e.target.value, searchStats);
-                });
-            }
-        });
-        
-        function performSearch(searchTerm, statsElement) {
-            const term = searchTerm.toLowerCase().trim();
-            
-            // Clear previous highlights
-            clearHighlights();
-            
-            if (!term) {
-                showAllElements();
-                updateSearchStats(0, 0, statsElement);
-                return;
-            }
-            
-            // Find all searchable elements
-            const searchableElements = document.querySelectorAll(
-                '.transcript-segment, .pdf-item, .mapping-item, .screenshot-item'
-            );
-            
-            let visibleCount = 0;
-            let highlightCount = 0;
-            
-            searchableElements.forEach(element => {
-                const text = element.textContent.toLowerCase();
-                const hasMatch = text.includes(term);
-                
-                if (hasMatch) {
-                    element.style.display = '';
-                    highlightText(element, term);
-                    visibleCount++;
-                    highlightCount += countOccurrences(text, term);
-                } else {
-                    element.style.display = 'none';
-                }
-            });
-            
-            updateSearchStats(visibleCount, highlightCount, statsElement);
-        }
-        
-        function highlightText(element, term) {
-            const walker = document.createTreeWalker(
-                element,
-                NodeFilter.SHOW_TEXT,
-                null,
-                false
-            );
-            
-            const textNodes = [];
-            let node;
-            
-            while (node = walker.nextNode()) {
-                if (node.nodeValue.toLowerCase().includes(term)) {
-                    textNodes.push(node);
-                }
-            }
-            
-            textNodes.forEach(textNode => {
-                const parent = textNode.parentNode;
-                const text = textNode.nodeValue;
-                const regex = new RegExp(`(${escapeRegExp(term)})`, 'gi');
-                const highlightedText = text.replace(regex, '<span class="highlight">$1</span>');
-                
-                if (highlightedText !== text) {
-                    const wrapper = document.createElement('span');
-                    wrapper.innerHTML = highlightedText;
-                    parent.replaceChild(wrapper, textNode);
-                }
-            });
-        }
-        
-        function clearHighlights() {
-            const highlights = document.querySelectorAll('.highlight');
-            highlights.forEach(highlight => {
-                const parent = highlight.parentNode;
-                parent.replaceChild(document.createTextNode(highlight.textContent), highlight);
-                parent.normalize();
-            });
-        }
-        
-        function showAllElements() {
-            const elements = document.querySelectorAll(
-                '.transcript-segment, .pdf-item, .mapping-item, .screenshot-item'
-            );
-            elements.forEach(element => {
-                element.style.display = '';
-            });
-        }
-        
-        function countOccurrences(text, term) {
-            return (text.match(new RegExp(escapeRegExp(term), 'gi')) || []).length;
-        }
-        
-        function escapeRegExp(string) {
-            return string.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
-        }
-        
-        function updateSearchStats(visible, highlights, statsElement) {
-            if (statsElement) {
-                if (highlights > 0) {
-                    statsElement.textContent = `${visible} Elemente gefunden, ${highlights} Treffer`;
-                } else if (visible === 0) {
-                    statsElement.textContent = 'Keine Ergebnisse gefunden';
-                } else {
-                    statsElement.textContent = '';
-                }
-            }
-        }
-        
-        // Image lazy loading enhancement
-        document.addEventListener('DOMContentLoaded', function() {
-            const images = document.querySelectorAll('img[loading="lazy"]');
-            
-            if ('IntersectionObserver' in window) {
-                const imageObserver = new IntersectionObserver((entries, observer) => {
-                    entries.forEach(entry => {
-                        if (entry.isIntersecting) {
-                            const img = entry.target;
-                            img.classList.add('loaded');
-                            observer.unobserve(img);
-                        }
-                    });
-                });
-                
-                images.forEach(img => imageObserver.observe(img));
-            }
-        });
-        
-        // Keyboard shortcuts
-        document.addEventListener('keydown', function(e) {
-            // Ctrl/Cmd + F to focus search
-            if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-                e.preventDefault();
-                const searchInput = document.getElementById('searchInput');
-                if (searchInput) {
-                    searchInput.focus();
-                    searchInput.select();
-                }
-            }
-            
-            // Escape to clear search
-            if (e.key === 'Escape') {
-                const searchInput = document.getElementById('searchInput');
-                if (searchInput && searchInput === document.activeElement) {
-                    searchInput.value = '';
-                    performSearch('', document.getElementById('searchStats'));
-                }
-            }
-        });
-        """
-    
-    def generate_index_page(self, all_results: List[Dict], output_path: str) -> None:
-        """
-        Generate an index page linking to all processed videos.
-        
-        Args:
-            all_results: List of all processing results
-            output_path: Path to save the index HTML
-        """
-        logger.info(f"Generating index page: {output_path}")
-        
-        videos_html = []
-        for result in all_results:
-            video_name = Path(result["video_path"]).stem
-            transcription = result.get("transcription", {})
-            screenshots_count = len(result.get("screenshots", []))
-            pdfs_count = len(result.get("related_pdfs", []))
-            
-            duration = transcription.get("total_duration", 0) / 1000 / 60
-            processing_time = result.get("processing_timestamp", "N/A")
-            
-            videos_html.append(f"""
-            <div class="video-card">
-                <h3><a href="{video_name}/{video_name}_report.html">📹 {video_name}</a></h3>
-                <div class="video-stats">
-                    <span>⏱️ {duration:.1f} min</span>
-                    <span>📸 {screenshots_count} Screenshots</span>
-                    <span>📄 {pdfs_count} PDFs</span>
-                </div>
-                <p class="processing-time">Verarbeitet: {processing_time}</p>
-            </div>
-            """)
-        
-        html_content = f"""<!DOCTYPE html>
-<html lang="de">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>📚 Studienanalyse - Übersicht</title>
+    <title>{report_title_base} - Analysis Report</title>
+    <script type="application/json" id="allData">
+        {json.dumps(results, ensure_ascii=False, indent=2)}
+    </script>
     <style>
-        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; line-height: 1.6; background: #f8f9fa; }}
-        .container {{ max-width: 1200px; margin: 0 auto; }}
-        .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 12px; margin-bottom: 30px; }}
-        .header h1 {{ margin: 0; font-size: 2.5em; }}
-        .summary {{ background: white; padding: 25px; border-radius: 8px; margin-bottom: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-        .videos-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 20px; }}
-        .video-card {{ background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); transition: transform 0.2s ease; }}
-        .video-card:hover {{ transform: translateY(-2px); }}
-        .video-card h3 {{ margin-top: 0; color: #2c3e50; }}
-        .video-card a {{ text-decoration: none; color: inherit; }}
-        .video-card a:hover {{ color: #667eea; }}
-        .video-stats {{ display: flex; gap: 15px; margin: 15px 0; }}
-        .video-stats span {{ background: #f8f9fa; padding: 5px 10px; border-radius: 15px; font-size: 14px; }}
-        .processing-time {{ color: #666; font-size: 14px; margin: 0; }}
+        {self._get_embedded_css()}
     </style>
 </head>
 <body>
-    <div class="container">
+    {self._generate_body_content(first_result_data, report_title_base)}
+    <script>
+        {self._get_embedded_javascript(results)}
+    </script>
+</body>
+</html>
+'''
+
+    def _get_embedded_css(self) -> str:
+        """Returns the embedded CSS for the HTML report."""
+        return '''
+        body { font-family: sans-serif; margin: 0; background-color: #f4f4f4; color: #333; }
+        .container { max-width: 1200px; margin: 20px auto; background-color: #fff; padding: 20px; box-shadow: 0 0 10px rgba(0,0,0,0.1); border-radius: 8px; }
+        .header { background-color: #007bff; color: white; padding: 20px; border-radius: 8px 8px 0 0; margin: -20px -20px 20px -20px; }
+        .header h1 { margin: 0; font-size: 1.8em; }
+        .header-info { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 10px; font-size: 0.9em; }
+        .header-info div { background-color: rgba(255,255,255,0.1); padding: 8px; border-radius: 4px; }
+        .file-selector-container { margin-bottom: 20px; padding: 10px; background-color: #e9ecef; border-radius: 4px; }
+        .file-selector-container label { margin-right: 10px; font-weight: bold; }
+        #fileSelector { padding: 8px; border-radius: 4px; border: 1px solid #ccc; min-width: 300px; }
+        .tabs { display: flex; border-bottom: 1px solid #ccc; margin-bottom: 20px; }
+        .tab { padding: 10px 15px; cursor: pointer; border: 1px solid transparent; border-bottom: none; margin-right: 5px; border-radius: 4px 4px 0 0; background-color: #e9ecef; }
+        .tab.active { background-color: #fff; border-color: #ccc; border-bottom-color: #fff; position: relative; top: 1px; font-weight: bold; }
+        .tab-content { display: none; padding: 15px; border: 1px solid #ccc; border-top: none; border-radius: 0 0 4px 4px; }
+        .tab-content.active { display: block; }
+        .section { margin-bottom: 20px; }
+        .section h2 { font-size: 1.5em; color: #007bff; border-bottom: 2px solid #007bff; padding-bottom: 5px; margin-top: 0; }
+        .section-stats { display: flex; gap: 20px; margin-bottom: 10px; font-size: 0.9em; color: #555; }
+        .transcript-segment { border: 1px solid #eee; padding: 10px; margin-bottom: 10px; border-radius: 4px; background-color: #f9f9f9; }
+        .segment-header { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 0.9em; color: #555; }
+        .timestamp { font-weight: bold; }
+        .confidence { padding: 2px 6px; border-radius: 3px; color: white; }
+        .high-confidence { background-color: #28a745; }
+        .medium-confidence { background-color: #ffc107; color: #333; }
+        .low-confidence { background-color: #dc3545; }
+        .segment-text { margin-top: 0; white-space: pre-wrap; }
+        .stats-card { background-color: #f9f9f9; border: 1px solid #eee; border-radius: 4px; padding: 15px; margin-bottom: 15px; }
+        .stats-card h3 { margin-top: 0; font-size: 1.2em; color: #333; }
+        .stats-card p { margin: 5px 0; font-size: 0.95em; }
+        .stats-card strong { color: #007bff; }
+        .empty-state { text-align: center; color: #777; padding: 20px; font-style: italic; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 0.9em; }
+        th { background-color: #007bff; color: white; }
+        tr:nth-child(even) { background-color: #f2f2f2; }
+        /* Add more styles as needed */
+        '''
+
+    def _generate_body_content(self, first_result_data: dict, report_title_base: str) -> str:
+        """Generates the initial HTML structure for the report body."""
+        # Use os.path.basename for cleaner file display name
+        file_path = first_result_data.get("audio_file_path", "N/A")
+        display_file_name = os.path.basename(file_path) if file_path != "N/A" else "N/A"
+        
+        # Initial values from first_result_data, JavaScript will update these
+        processing_timestamp = first_result_data.get("processing_timestamp", new_datetime_string())
+        duration_seconds = 0
+        if first_result_data.get("transcription", {}).get("segments"):
+            segments = first_result_data.get("transcription", {}).get("segments", [])
+            if segments:
+                duration_seconds = segments[-1].get("end", 0)
+        duration_minutes_text = f"{(duration_seconds / 60):.1f} Minuten"
+        
+        language = first_result_data.get("transcription_config", {}).get("language") or first_result_data.get("transcription", {}).get("language", "N/A")
+        screenshots_count = len(first_result_data.get("screenshots", []))
+        pdfs_count = len(first_result_data.get("related_pdfs", []))
+
+        return f'''
+    <div class="container" id="active_file_container">
         <div class="header">
-            <h1>📚 Studienanalyse - Übersicht</h1>
-            <p>Generiert am: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}</p>
+            <h1>📚 {report_title_base} - Analysis Report</h1>
+            <div class="header-info">
+                <div id="active_info_timestamp_container"><strong>Verarbeitet:</strong> <span id="active_info_timestamp">{processing_timestamp}</span></div>
+                <div id="active_info_filePath_container"><strong>Datei:</strong> <span id="active_info_filePath">{display_file_name}</span></div>
+                <div id="active_info_duration_container"><strong>Dauer:</strong> <span id="active_info_duration">{duration_minutes_text}</span></div>
+                <div id="active_info_language_container"><strong>Sprache:</strong> <span id="active_info_language">{language}</span></div>
+                <div id="active_info_screenshotsCount_container"><strong>Screenshots:</strong> <span id="active_info_screenshotsCount">{screenshots_count}</span></div>
+                <div id="active_info_pdfsCount_container"><strong>PDFs:</strong> <span id="active_info_pdfsCount">{pdfs_count}</span></div>
+            </div>
         </div>
-        
-        <div class="summary">
-            <h2>📊 Zusammenfassung</h2>
-            <p><strong>{len(all_results)}</strong> Videos verarbeitet</p>
+
+        <div class="file-selector-container">
+            <label for="fileSelector">Analysierte Datei auswählen:</label>
+            <select id="fileSelector" onchange="handleFileSelectionChange(this.value)">
+                <!-- Options will be populated by JavaScript -->
+            </select>
         </div>
-        
-        <h2>🎥 Verarbeitete Videos</h2>
-        <div class="videos-grid">
-            {''.join(videos_html)}
+
+        <div class="tabs">
+            <div class="tab active" onclick="showTab('active_transcript', 'active_file_container')" data-tab="active_transcript">📝 Transkript</div>
+            <div class="tab" onclick="showTab('active_statistics', 'active_file_container')" data-tab="active_statistics">📊 Statistiken & Parameter</div>
+            <div class="tab" onclick="showTab('active_screenshots', 'active_file_container')" data-tab="active_screenshots">🖼️ Screenshots</div>
+            <div class="tab" onclick="showTab('active_pdfs', 'active_file_container')" data-tab="active_pdfs">📄 PDFs</div>
+            <div class="tab" onclick="showTab('active_mapping', 'active_file_container')" data-tab="active_mapping">🔗 Mapping</div>
+        </div>
+
+        <div id="active_transcript" class="tab-content active">
+            {self._initial_transcript_html(first_result_data.get("transcription", {}))}
+        </div>
+        <div id="active_statistics" class="tab-content">
+            {self._initial_statistics_html(first_result_data)}
+        </div>
+        <div id="active_screenshots" class="tab-content">
+            {self._initial_screenshots_html(first_result_data.get("screenshots", []))}
+        </div>
+        <div id="active_pdfs" class="tab-content">
+            {self._initial_pdfs_html(first_result_data.get("related_pdfs", []))}
+        </div>
+        <div id="active_mapping" class="tab-content">
+            {self._initial_mapping_html(first_result_data.get("screenshot_transcript_mapping", []))}
         </div>
     </div>
-</body>
-</html>"""
+'''
+
+    def _initial_transcript_html(self, transcription_data: dict) -> str:
+        # This is a helper for initial rendering. JS will use its own generator.
+        if not transcription_data or not transcription_data.get("segments"):
+            return '<div class="empty-state"><p>Kein Transkript verfügbar.</p></div>'
         
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(html_content)
+        segments_html = ""
+        for segment in transcription_data.get("segments", []):
+            start_formatted = format_timestamp_seconds(segment.get("start", 0))
+            end_formatted = format_timestamp_seconds(segment.get("end", 0))
+            text = (segment.get("text") or "").strip()
+            confidence = segment.get("confidence", 0)
+            # Simplified confidence class for initial render, JS can be more detailed
+            confidence_class = "high-confidence" if confidence > 0.8 else ("medium-confidence" if confidence > 0.6 else "low-confidence")
+            if not text: continue
+            segments_html += f'''
+                <div class="transcript-segment">
+                    <div class="segment-header">
+                        <span class="timestamp">[{start_formatted} - {end_formatted}]</span>
+                        <span class="confidence {confidence_class}">Vertrauen: {confidence:.2f}</span>
+                    </div>
+                    <p class="segment-text">{text}</p>
+                </div>
+            '''
+        full_text = transcription_data.get("text", "")
+        word_count = len(full_text.split()) if full_text else 0
+        return f'''
+            <div class="section">
+                <h2>📝 Transkript</h2>
+                <div class="section-stats">
+                    <span>Segmente: {len(transcription_data.get("segments", []))}</span>
+                    <span>Wörter: {word_count}</span>
+                    <span>Zeichen: {len(full_text)}</span>
+                </div>
+                <div class="transcript-container">{segments_html}</div>
+            </div>
+        '''
+
+    def _initial_statistics_html(self, file_data: dict) -> str:
+        # Placeholder for initial statistics. JS will generate the full content.
+        return '<div class="section"><h2>📊 Statistiken & Parameter</h2><div class="empty-state"><p>Statistiken werden geladen...</p></div></div>'
+
+    def _initial_screenshots_html(self, screenshots: list) -> str:
+        return '<div class="section"><h2>🖼️ Screenshots</h2><div class="empty-state"><p>Screenshots werden geladen...</p></div></div>'
         
-        logger.info(f"Index page saved to: {output_path}")
+    def _initial_pdfs_html(self, pdfs: list) -> str:
+        return '<div class="section"><h2>📄 PDFs</h2><div class="empty-state"><p>PDFs werden geladen...</p></div></div>'
+
+    def _initial_mapping_html(self, mapping_data: list) -> str:
+        return '<div class="section"><h2>🔗 Mapping</h2><div class="empty-state"><p>Mapping-Daten werden geladen...</p></div></div>'
+
+    def _get_embedded_javascript(self, all_analysis_results: List[Dict]) -> str:
+        """Generate JavaScript for tab navigation, search, and dynamic content updates."""
+        # The all_analysis_results are embedded in the HTML separately and parsed by this JS.
+        # This method now primarily returns the static JS code.
+        # The actual data (all_analysis_results) is picked up by the JS from the <script id="allData"> tag.
+        return r"""
+        // JavaScript code for HTML report interactivity
+        
+        function showTab(tabId, containerId) {
+            var container = document.getElementById(containerId);
+            if (!container) {
+                console.error("Container not found for tabs:", containerId);
+                return;
+            }
+            var tabContents = container.querySelectorAll('.tab-content');
+            tabContents.forEach(function(content) {
+                content.classList.remove('active');
+                content.style.display = 'none';
+            });
+
+            var tabs = container.querySelectorAll('.tabs .tab');
+            tabs.forEach(function(tab) {
+                tab.classList.remove('active');
+            });
+
+            var selectedTabContent = document.getElementById(tabId);
+            if (selectedTabContent) {
+                selectedTabContent.classList.add('active');
+                selectedTabContent.style.display = 'block';
+            }
+            
+            var selectedTabButton = container.querySelector('.tabs .tab[data-tab="' + tabId + '"]');
+            if (selectedTabButton) {
+                selectedTabButton.classList.add('active');
+            }
+            console.log("Showing tab: " + tabId + " in container: " + containerId);
+        }
+
+        let allAnalysisData = []; // Global store for all file data
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const allDataScriptTag = document.getElementById('allData');
+            if (allDataScriptTag) {
+                try {
+                    allAnalysisData = JSON.parse(allDataScriptTag.textContent);
+                } catch (e) {
+                    console.error('Error parsing embedded JSON data:', e);
+                    return;
+                }
+            } else {
+                console.error('Could not find embedded JSON data script tag.');
+                return;
+            }
+
+            if (!allAnalysisData || allAnalysisData.length === 0) {
+                console.warn('No analysis data found or data is empty.');
+                const bodyContainer = document.querySelector('.container');
+                if (bodyContainer) {
+                    bodyContainer.innerHTML = '<div class="empty-state"><h1>Keine Analysedaten verfügbar</h1><p>Bitte stellen Sie sicher, dass die JSON-Daten korrekt eingebettet sind.</p></div>';
+                }
+                return;
+            }
+
+            populateFileSelector();
+            if (allAnalysisData.length > 0) {
+                updatePageContent(0); 
+            }
+            showTab('active_transcript', 'active_file_container'); 
+        });
+
+        function populateFileSelector() {
+            const selector = document.getElementById('fileSelector');
+            if (!selector) {
+                console.error('File selector element not found.');
+                return;
+            }
+            selector.innerHTML = ''; 
+
+            allAnalysisData.forEach((fileData, index) => {
+                let displayName = 'Unknown File';
+                if (fileData.audio_file_path) {
+                    const pathParts = fileData.audio_file_path.replace(/\\/g, '/').split('/');
+                    displayName = pathParts.pop() || `Datei ${index + 1}`;
+                } else if (fileData.error) {
+                    displayName = `Fehler bei Datei ${index + 1}`;
+                } else {
+                    displayName = `Analyse ${index + 1}`;
+                }
+                
+                const option = document.createElement('option');
+                option.value = index; 
+                option.textContent = displayName;
+                selector.appendChild(option);
+            });
+        }
+
+        function handleFileSelectionChange(selectedIndex) {
+            console.log('File selection changed to index:', selectedIndex);
+            updatePageContent(parseInt(selectedIndex, 10));
+        }
+        
+        function getSafe(fn, defaultValue = 'N/A') {
+            try {
+                const value = fn();
+                return (value === undefined || value === null) ? defaultValue : value;
+            } catch (e) {
+                return defaultValue;
+            }
+        }
+
+        function updatePageContent(fileIndex) {
+            if (fileIndex < 0 || fileIndex >= allAnalysisData.length) {
+                console.error('Invalid file index:', fileIndex);
+                return;
+            }
+            const selectedFileData = allAnalysisData[fileIndex];
+            console.log('Updating page with data for:', getSafe(() => selectedFileData.audio_file_path, 'Unknown audio path'));
+
+            const mainHeaderTitle = document.querySelector('.header h1');
+            if (mainHeaderTitle) {
+                let reportTitleBase = "Transcription Analysis Report";
+                const audioPath = getSafe(() => selectedFileData.audio_file_path);
+                if (audioPath !== 'N/A') {
+                    reportTitleBase = audioPath.replace(/\\/g, '/').split('/').pop().split('.').slice(0, -1).join('.') || audioPath.replace(/\\/g, '/').split('/').pop();
+                } else if (getSafe(() => selectedFileData.error) !== 'N/A') {
+                    const errorFileName = getSafe(() => selectedFileData.audio_file_path, "Unknown File").replace(/\\/g, '/').split('/').pop();
+                    reportTitleBase = `Error processing: ${errorFileName}`;
+                }
+                 mainHeaderTitle.textContent = `📚 ${reportTitleBase} - Analysis Report`;
+            }
+            
+            document.getElementById('active_info_timestamp').textContent = getSafe(() => selectedFileData.processing_timestamp, new Date().toLocaleString());
+            const filePathDisplay = getSafe(() => selectedFileData.audio_file_path, 'N/A');
+            document.getElementById('active_info_filePath').textContent = filePathDisplay.replace(/\\/g, '/').split('/').pop();
+            
+            let durationMinutesText = '0.0 Minuten';
+            const segmentsForDuration = getSafe(() => selectedFileData.transcription.segments, []);
+            if (segmentsForDuration.length > 0) {
+                const lastSegmentEnd = getSafe(() => segmentsForDuration[segmentsForDuration.length - 1].end, 0);
+                durationMinutesText = (lastSegmentEnd / 60).toFixed(1) + ' Minuten';
+            }
+            document.getElementById('active_info_duration').textContent = durationMinutesText;
+            
+            const lang = getSafe(() => selectedFileData.transcription_config.language, getSafe(() => selectedFileData.transcription.language, 'N/A'));
+            document.getElementById('active_info_language').textContent = lang;
+            document.getElementById('active_info_screenshotsCount').textContent = getSafe(() => selectedFileData.screenshots.length, 0);
+            document.getElementById('active_info_pdfsCount').textContent = getSafe(() => selectedFileData.related_pdfs.length, 0);
+
+            const transcriptContentDiv = document.getElementById('active_transcript');
+            if (transcriptContentDiv) {
+                transcriptContentDiv.innerHTML = generateTranscriptSectionHTML(getSafe(() => selectedFileData.transcription, {}), "active_");
+            }
+            
+            const statsContainer = document.getElementById('active_statistics'); 
+            if (statsContainer) {
+                statsContainer.innerHTML = generateStatisticsSectionHTML(selectedFileData, "active_");
+            }
+            
+            const screenshotsContent = document.getElementById('active_screenshots');
+            if (screenshotsContent) {
+                screenshotsContent.innerHTML = generateScreenshotsSectionHTML(getSafe(() => selectedFileData.screenshots, []), "active_");
+            }
+
+            const pdfsContent = document.getElementById('active_pdfs');
+            if (pdfsContent) {
+                pdfsContent.innerHTML = generatePdfsSectionHTML(getSafe(() => selectedFileData.related_pdfs, []), "active_");
+            }
+
+            const mappingContent = document.getElementById('active_mapping');
+            if (mappingContent) {
+                mappingContent.innerHTML = generateMappingSectionHTML(getSafe(() => selectedFileData.screenshot_transcript_mapping, []), "active_");
+            }
+            
+            const activeTabContainer = document.getElementById('active_file_container');
+            let tabToReshowId = 'active_transcript'; 
+            if (activeTabContainer) {
+                const currentActiveTabButton = activeTabContainer.querySelector('.tabs .tab.active');
+                if (currentActiveTabButton) {
+                    tabToReshowId = currentActiveTabButton.getAttribute('data-tab');
+                }
+            }
+            showTab(tabToReshowId, 'active_file_container');
+        }
+
+        function formatTimestampJS(totalSeconds) {
+            if (typeof totalSeconds !== 'number' || isNaN(totalSeconds)) return '00:00';
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = Math.floor(totalSeconds % 60);
+            if (hours > 0) {
+                return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }
+            return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        function getConfidenceClassJS(confidence) {
+            if (typeof confidence !== 'number') return 'low-confidence';
+            if (confidence >= 0.9) return 'high-confidence';
+            if (confidence >= 0.7) return 'medium-confidence';
+            return 'low-confidence';
+        }
+        
+        function generateTranscriptSegmentsHTML(transcriptionData) {
+            const segments = getSafe(() => transcriptionData.segments, []);
+            if (segments.length === 0) {
+                return '<div class="empty-state"><p>Kein Transkript verfügbar.</p></div>';
+            }
+            let segmentsHtml = '';
+            segments.forEach(segment => {
+                const startFormatted = formatTimestampJS(getSafe(() => segment.start, 0));
+                const endFormatted = formatTimestampJS(getSafe(() => segment.end, 0));
+                const text = getSafe(() => segment.text, "").trim();
+                const confidence = getSafe(() => segment.confidence, 0);
+                const confidenceClass = getConfidenceClassJS(confidence);
+
+                if (!text) return; 
+
+                segmentsHtml += `
+                    <div class="transcript-segment" data-start="${getSafe(() => segment.start, 0) * 1000}" data-end="${getSafe(() => segment.end, 0) * 1000}">
+                        <div class="segment-header">
+                            <span class="timestamp">[${startFormatted} - ${endFormatted}]</span>
+                            <span class="confidence ${confidenceClass}">Vertrauen: ${confidence.toFixed(2)}</span>
+                        </div>
+                        <p class="segment-text">${text.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
+                    </div>
+                `;
+            });
+            return segmentsHtml;
+        }
+
+        function generateTranscriptSectionHTML(transcriptionData, file_id_prefix_unused) {
+            const segments_html_content = generateTranscriptSegmentsHTML(transcriptionData); 
+            const full_text = getSafe(() => transcriptionData.text, "");
+            const word_count = full_text ? full_text.split(/\s+/).filter(Boolean).length : 0;
+            const segments_count = getSafe(() => transcriptionData.segments.length, 0);
+
+            return `
+                <div class="section">
+                    <h2>📝 Transkript</h2>
+                    <div class="section-stats">
+                        <span>Segmente: ${segments_count}</span>
+                        <span>Wörter: ${word_count}</span>
+                        <span>Zeichen: ${full_text.length}</span>
+                    </div>
+                    <div class="transcript-container">
+                        ${segments_html_content}
+                    </div>
+                </div>
+            `;
+        }
+
+        function generateStatisticsSectionHTML(fileData, file_id_prefix_unused) {
+            const transcription_data = getSafe(() => fileData.transcription, {});
+            const transcription_config = getSafe(() => fileData.transcription_config, {});
+            const speech_pattern_analysis = getSafe(() => fileData.speech_pattern_analysis, {});
+
+            const processing_time_seconds = getSafe(() => transcription_data.processing_time_seconds, getSafe(() => fileData.processing_time_seconds, 0));
+            const segments_list = getSafe(() => transcription_data.segments, []);
+            const segments_total = segments_list.length;
+            
+            const full_text = getSafe(() => transcription_data.text, "");
+            const word_count = full_text ? full_text.split(/\\s+/).filter(Boolean).length : 0;
+            const char_count = full_text.length;
+
+            let params_html = '<div class="stats-card"><h3>⚙️ Transkriptionsparameter</h3><div class="stats-content">';
+            const params_to_display = {
+                "Modell": getSafe(() => transcription_config.model_name),
+                "Gerät": getSafe(() => transcription_config.device),
+                "Sprache": getSafe(() => transcription_config.language),
+                "Segmentierungsmodus": getSafe(() => transcription_config.segmentation_mode),
+            };
+            for (const key in params_to_display) {
+                const value = params_to_display[key];
+                if (value !== 'N/A' && value !== undefined && value !== null) {
+                    params_html += `<p><strong>${key}:</strong> ${value}</p>`;
+                }
+            }
+            const config_params_details = getSafe(() => transcription_config.parameters, {});
+            if (Object.keys(config_params_details).length > 0) {
+                params_html += "<h4>Parameter Details:</h4>";
+                for (const pk in config_params_details) {
+                     params_html += `<p><strong>${pk.replace(/_/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase())}:</strong> ${config_params_details[pk]}</p>`;
+                }
+            }
+            params_html += '</div></div>';
+            
+            let generalStatsHtml = `
+                <div class="stats-card">
+                    <h3>📊 Allgemeine Transkriptionsstatistiken</h3>
+                    <div class="stats-content">
+                        <p><strong>Verarbeitungszeit:</strong> ${processing_time_seconds.toFixed(2)} Sekunden</p>
+                        <p><strong>Anzahl Segmente:</strong> ${segments_total}</p>
+                        <p><strong>Gesamtwortzahl:</strong> ${word_count}</p>
+                        <p><strong>Gesamtzeichenzahl:</strong> ${char_count}</p>
+                    </div>
+                </div>`;
+
+            let speechPatternHtml = '<div class="stats-card"><h3>🗣️ Sprachmusteranalyse</h3><div class="stats-content">';
+            const spa_to_display = {
+                "Dauer (Sekunden)": getSafe(() => speech_pattern_analysis.duration_seconds),
+                "Mittlere Lautstärke (dB)": getSafe(() => speech_pattern_analysis.mean_volume_db, 0).toFixed(2),
+                "Lautstärke StdAbw (dB)": getSafe(() => speech_pattern_analysis.volume_std, 0).toFixed(2),
+                "Anteil Stille": (getSafe(() => speech_pattern_analysis.quiet_ratio, 0) * 100).toFixed(1) + '%',
+                "Anteil Sprache": (getSafe(() => speech_pattern_analysis.speech_ratio, 0) * 100).toFixed(1) + '%',
+                "Sprechertyp": getSafe(() => speech_pattern_analysis.speaker_type),
+                "Empf. Min. Stille (ms)": getSafe(() => speech_pattern_analysis.recommended_min_silence_len),
+                "Empf. Padding (ms)": getSafe(() => speech_pattern_analysis.recommended_padding),
+            };
+            let spaContentFound = false;
+            for (const key in spa_to_display) {
+                const value = spa_to_display[key];
+                if (value !== 'N/A' && value !== undefined && value !== null && !(typeof value === 'string' && value.includes('NaN'))) {
+                    speechPatternHtml += `<p><strong>${key}:</strong> ${value}</p>`;
+                    spaContentFound = true;
+                }
+            }
+            if (!spaContentFound) {
+                speechPatternHtml += '<p>Keine Sprachmusteranalyse-Daten verfügbar.</p>';
+            }
+            speechPatternHtml += '</div></div>';
+            
+            let errorHtml = '';
+            const fileError = getSafe(() => fileData.error);
+            if (fileError !== 'N/A') {
+                errorHtml = `
+                <div class="stats-card" style="background-color: #ffdddd; border-color: #ffaaaa;">
+                    <h3>⚠️ Fehler bei der Verarbeitung</h3>
+                    <p style="color: red; white-space: pre-wrap;">${fileError.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
+                </div>`;
+            }
+
+            return `
+                <div class="section">
+                    <h2>📊 Statistiken & Parameter</h2>
+                    ${errorHtml}
+                    ${params_html}
+                    ${generalStatsHtml}
+                    ${speechPatternHtml}
+                </div>
+            `;
+        }
+
+        function generateScreenshotsSectionHTML(screenshots, file_id_prefix_unused) {
+            if (!screenshots || screenshots.length === 0) {
+                return '<div class="section"><h2>🖼️ Screenshots</h2><div class="empty-state"><p>Keine Screenshots verfügbar.</p></div></div>';
+            }
+            let content = '<div class="section"><h2>🖼️ Screenshots</h2><div class="screenshots-container">';
+            screenshots.forEach(ss => {
+                const timestamp = getSafe(() => ss.timestamp, 0);
+                const imagePath = getSafe(() => ss.image_path, '#');
+                const notes = getSafe(() => ss.notes, '');
+                content += `
+                    <div class="screenshot-item stats-card">
+                        <img src="${imagePath}" alt="Screenshot bei ${formatTimestampJS(timestamp)}" style="max-width: 100%; height: auto; border-radius: 4px; margin-bottom: 10px;">
+                        <p><strong>Zeitstempel:</strong> ${formatTimestampJS(timestamp)}</p>
+                        <p><strong>Pfad:</strong> ${imagePath}</p>
+                        ${notes ? `<p><strong>Notizen:</strong> ${notes.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>` : ''}
+                    </div>
+                `;
+            });
+            content += '</div></div>';
+            return content;
+        }
+
+        function generatePdfsSectionHTML(pdfs, file_id_prefix_unused) {
+            if (!pdfs || pdfs.length === 0) {
+                return '<div class="section"><h2>📄 PDFs</h2><div class="empty-state"><p>Keine PDFs verfügbar.</p></div></div>';
+            }
+            let content = '<div class="section"><h2>📄 PDFs</h2><div class="pdfs-container"><table><thead><tr><th>Dateiname</th><th>Relevanz</th><th>Notizen</th></tr></thead><tbody>';
+            pdfs.forEach(pdf => {
+                const fileName = getSafe(() => pdf.file_path, 'Unbekannte PDF').replace(/\\/g, '/').split('/').pop();
+                const relevance = getSafe(() => pdf.relevance_score, 0).toFixed(2);
+                const notes = getSafe(() => pdf.notes, '');
+                content += `
+                    <tr>
+                        <td><a href="${getSafe(() => pdf.file_path, '#')}" target="_blank">${fileName}</a></td>
+                        <td>${relevance}</td>
+                        <td>${notes.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</td>
+                    </tr>
+                `;
+            });
+            content += '</tbody></table></div></div>';
+            return content;
+        }
+        
+        function generateMappingSectionHTML(mappingData, file_id_prefix_unused) {
+            if (!mappingData || mappingData.length === 0) {
+                return '<div class="section"><h2>🔗 Screenshot-Transkript-Mapping</h2><div class="empty-state"><p>Keine Mapping-Daten verfügbar.</p></div></div>';
+            }
+            let content = '<div class="section"><h2>🔗 Screenshot-Transkript-Mapping</h2><div class="mapping-container"><table><thead><tr><th>Screenshot Zeit</th><th>Screenshot Pfad</th><th>Transkriptsegment</th><th>Segment Zeit</th></tr></thead><tbody>';
+            mappingData.forEach(mapItem => {
+                const ssTime = formatTimestampJS(getSafe(() => mapItem.screenshot_timestamp, 0));
+                const ssPath = getSafe(() => mapItem.screenshot_path, 'N/A').replace(/\\/g, '/').split('/').pop();
+                const segmentText = getSafe(() => mapItem.transcript_segment_text, 'N/A');
+                const segmentTime = `[${formatTimestampJS(getSafe(() => mapItem.segment_start_time, 0))} - ${formatTimestampJS(getSafe(() => mapItem.segment_end_time, 0))}]`;
+                
+                content += `
+                    <tr>
+                        <td>${ssTime}</td>
+                        <td>${ssPath}</td>
+                        <td>${segmentText.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</td>
+                        <td>${segmentTime}</td>
+                    </tr>
+                `;
+            });
+            content += '</tbody></table></div></div>';
+            return content;
+        }
+        
+        function new_datetime_string() {
+            const now = new Date();
+            return now.getFullYear() + '-' + (now.getMonth() + 1).toString().padStart(2, '0') + '-' + now.getDate().toString().padStart(2, '0') + ' ' +
+                   now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0') + ':' + now.getSeconds().toString().padStart(2, '0');
+        }
+"""
+
+    def _get_empty_result_structure(self) -> dict:
+        """Returns a default structure for when no results are available or an error occurs."""
+        return {
+            "audio_file_path": "N/A",
+            "processing_timestamp": new_datetime_string(), # Use Python's datetime for initial server-side render
+            "transcription": {"text": "No data available.", "segments": []},
+            "transcription_config": {},
+            "speech_pattern_analysis": {},
+            "error": "No data loaded"
+        }
+
+# Helper for Python side, if needed by _generate_body_content for initial render
+def new_datetime_string():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")

@@ -426,6 +426,139 @@ class WaveformAnalyzer:
         
         return segments
 
+    def detect_speech_segments(self, audio_segment: AudioSegment) -> List[Tuple[int, int]]:
+        """
+        Detects speech segments from an AudioSegment object using waveform analysis.
+        This is the primary method for precision_waveform_detection.
+
+        Args:
+            audio_segment: The pydub AudioSegment object to analyze.
+
+        Returns:
+            A list of tuples, where each tuple is (start_ms, end_ms) of a detected speech segment.
+        """
+        logger.info(f"🔬 Starting scientific waveform analysis for precision_waveform_detection")
+        start_time = time.time()
+
+        audio_duration_ms = len(audio_segment)
+        audio_duration_s = audio_duration_ms / 1000.0
+
+        logger.info(f"📊 Audio loaded: {audio_duration_s:.1f}s, {audio_segment.frame_rate}Hz, {audio_segment.channels} channel(s)")
+
+        # Convert to numpy array for analysis
+        audio_data = np.array(audio_segment.get_array_of_samples())
+        if audio_segment.channels == 2:
+            audio_data = audio_data.reshape((-1, 2))
+            audio_data = np.mean(audio_data, axis=1)  # Convert to mono
+        
+        # Normalize audio data
+        audio_data = audio_data.astype(np.float32)
+        if np.max(np.abs(audio_data)) > 0: # Avoid division by zero for silent audio
+            audio_data = audio_data / np.max(np.abs(audio_data))
+        else: # Handle completely silent audio
+            logger.info("Audio data is completely silent. No speech segments will be detected.")
+            return []
+
+        # Perform frame-based analysis
+        # Note: _analyze_frames expects sample_rate, ensure audio_segment.frame_rate is correct
+        frame_analysis = self._analyze_frames(audio_data, audio_segment.frame_rate)
+        
+        # Detect speech segments (returns start_sec, end_sec)
+        # Note: _detect_speech_segments expects sample_rate
+        speech_segments_sec = self._detect_speech_segments(frame_analysis, audio_segment.frame_rate)
+        
+        # Post-process segments (returns start_ms, end_ms)
+        # Note: _post_process_segments expects audio_duration in seconds
+        processed_segments_ms = self._post_process_segments(speech_segments_sec, audio_duration_s)
+        
+        analysis_time = time.time() - start_time
+        
+        logger.info(f"✅ Waveform analysis for speech detection completed in {analysis_time:.2f}s")
+        logger.info(f"🎯 Detected {len(processed_segments_ms)} speech segments via detect_speech_segments")
+        
+        return processed_segments_ms
+
+    def defensive_silence_detection(
+        self, 
+        audio: AudioSegment, 
+        min_silence_len: int, 
+        silence_thresh_offset: float, 
+        padding_ms: int,
+        analysis: Optional[Dict] = None # Added analysis for consistency, can be used for dynamic thresholding
+    ) -> List[Tuple[int, int]]:
+        """
+        Detects non-silent (likely speech) ranges using pydub's silence detection,
+        with configurable parameters for a "defensive" approach.
+
+        Args:
+            audio: The AudioSegment to analyze.
+            min_silence_len: Minimum duration of silence to be considered a split point (in ms).
+            silence_thresh_offset: Offset from the audio's mean dBFS to set the silence threshold.
+                                   A positive value makes it more tolerant to noise (detects more as speech).
+                                   A negative value makes it stricter (detects less as speech).
+            padding_ms: Milliseconds of padding to add to the start and end of detected speech segments.
+            analysis: Optional speech pattern analysis from EnhancedAudioTranscriber, could be used for dynamic thresholds.
+
+        Returns:
+            A list of (start_ms, end_ms) tuples for detected non-silent ranges.
+        """
+        from pydub.silence import detect_nonsilent # Local import to keep pydub.silence optional if not used elsewhere
+
+        # Determine silence threshold. If analysis is provided and contains mean_volume_db, use it.
+        # Otherwise, use the audio segment's own dBFS.
+        if analysis and 'mean_volume_db' in analysis:
+            reference_dbfs = analysis['mean_volume_db']
+            logger.info(f"Using mean_volume_db from analysis ({reference_dbfs:.2f} dBFS) for silence threshold.")
+        else:
+            reference_dbfs = audio.dBFS
+            logger.info(f"Using audio.dBFS ({reference_dbfs:.2f} dBFS) for silence threshold (analysis not provided or no mean_volume_db).")
+
+        # Ensure reference_dbfs is a finite number, fallback if it's -inf (completely silent audio)
+        if not np.isfinite(reference_dbfs):
+            logger.warning(f"Reference dBFS is not finite ({reference_dbfs}). Falling back to -50 dBFS for threshold calculation.")
+            reference_dbfs = -50.0 # A reasonable fallback for silent audio
+
+        silence_threshold = reference_dbfs - silence_thresh_offset 
+        logger.info(f"Defensive silence detection: min_silence_len={min_silence_len}ms, silence_thresh={silence_threshold:.2f}dB (offset={silence_thresh_offset}dB), padding={padding_ms}ms")
+
+        # detect_nonsilent returns a list of [start, end] in ms
+        nonsilent_ranges = detect_nonsilent(
+            audio,
+            min_silence_len=min_silence_len,
+            silence_thresh=silence_threshold,
+            seek_step=1 # Check every 1 ms
+        )
+
+        if not nonsilent_ranges:
+            logger.info("No non-silent ranges detected by defensive_silence_detection.")
+            return []
+
+        # Apply padding and ensure segments are within audio bounds
+        padded_segments = []
+        audio_len_ms = len(audio)
+        for start_ms, end_ms in nonsilent_ranges:
+            padded_start = max(0, start_ms - padding_ms)
+            padded_end = min(audio_len_ms, end_ms + padding_ms)
+            
+            # Ensure segment has a minimum length after padding (e.g., > 0 or a configured min)
+            if padded_end > padded_start:
+                 # Optional: Merge overlapping segments after padding, though detect_nonsilent usually gives distinct chunks.
+                 # For simplicity, direct addition here. More complex merging could be added if needed.
+                if padded_segments and padded_start < padded_segments[-1][1]: # Overlap with previous
+                    # Merge with the previous segment
+                    logger.debug(f"Merging overlapping segment after padding: prev_end={padded_segments[-1][1]}, curr_start={padded_start}")
+                    padded_segments[-1] = (padded_segments[-1][0], max(padded_segments[-1][1], padded_end))
+                else:
+                    padded_segments.append((padded_start, padded_end))
+
+        # Filter out very short segments that might have resulted from padding or were inherently small
+        min_segment_len_config = self.config.get('min_segment_length', 1000) # Get from config, default 1s
+        final_segments = [(s, e) for s, e in padded_segments if (e - s) >= min_segment_len_config]
+
+
+        logger.info(f"Defensive silence detection found {len(nonsilent_ranges)} raw non-silent ranges, "
+                    f"{len(padded_segments)} after padding, {len(final_segments)} final segments.")
+        return final_segments
 
 def create_waveform_analyzer(config: Optional[Dict] = None) -> WaveformAnalyzer:
     """
