@@ -9,6 +9,8 @@
 - 📊 **Intelligente Anpassung** - Erkennt Sprechstile automatisch (langsam/schnell/Pausen)
 - 📹 **Vollständige Verarbeitung** - Audio + Video + Screenshots + HTML-Reports
 - 🔄 **Batch-Verarbeitung** - Automatische Verarbeitung ganzer Ordner
+- 📄 **Interaktive Multi-Datei HTML-Reports:** Analysieren Sie Ergebnisse mehrerer Dateien in einem einzigen Report mit einfacher Navigation. Inklusive Option zur schnellen Neugenerierung aus gespeicherten JSON-Ergebnissen.
+- 💡 **Zukünftiges Feature (In Planung):** Ergebnisse (JSON-Dateien und HTML-Report) automatisch als ZIP-Archiv für einfache Weitergabe und Archivierung paketieren.
 
 ---
 
