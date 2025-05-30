@@ -10,8 +10,8 @@ from pathlib import Path
 import os
 from skimage.metrics import structural_similarity as ssim
 
-from .config import DEFAULT_CONFIG
-from .utils import format_timestamp_seconds, ensure_directory, sanitize_filename
+from config import DEFAULT_CONFIG
+from utils import format_timestamp_seconds, ensure_directory, sanitize_filename
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,8 @@ class VideoScreenshotExtractor:
     def __init__(self, 
                  similarity_threshold: float = 0.85,
                  min_time_between_shots: float = 2.0,
-                 config: Optional[Dict] = None):
+                 config: Optional[Dict] = None,
+                 speech_segments: Optional[List[Dict]] = None): # Added speech_segments
         """
         Initialize the video screenshot extractor.
         
@@ -31,9 +32,11 @@ class VideoScreenshotExtractor:
             similarity_threshold: Threshold for scene change detection (0.0-1.0)
             min_time_between_shots: Minimum time between screenshots in seconds
             config: Additional configuration options
+            speech_segments: List of speech segments with 'start' and 'end' times.
         """
         self.similarity_threshold = similarity_threshold
         self.min_time_between_shots = min_time_between_shots
+        self.speech_segments = speech_segments if speech_segments else []
         
         # Merge config with defaults
         self.config = DEFAULT_CONFIG['screenshots'].copy()
@@ -48,7 +51,7 @@ class VideoScreenshotExtractor:
     
     def extract_screenshots(self, video_path: str, output_dir: str) -> List[Dict]:
         """
-        Extract screenshots from video at detected scene changes.
+        Extract screenshots from video based on speech segments and visual changes.
         
         Args:
             video_path: Path to video file
@@ -65,87 +68,132 @@ class VideoScreenshotExtractor:
             logger.error(f"Cannot open video: {video_path}")
             return []
         
-        # Get video properties
         fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps == 0:
+            logger.error(f"Video FPS is 0, cannot process: {video_path}")
+            cap.release()
+            return []
+            
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        duration_seconds = total_frames / fps if fps > 0 else 0
+        duration_seconds = total_frames / fps
         
         logger.info(f"Processing video: {duration_seconds:.1f}s, {fps:.1f} FPS, {total_frames} frames")
+        
+        screenshots = []
+        # Extract screenshot at the beginning of each speech segment
+        segment_start_timestamps = sorted(list(set([seg['start'] for seg in self.speech_segments if 'start' in seg])))
+        
+        for i, timestamp in enumerate(segment_start_timestamps):
+            frame_number = int(timestamp * fps)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            ret, frame = cap.read()
+            if ret:
+                # Use a unique index for these segment-start screenshots
+                # to avoid collision with change-detected screenshots.
+                # A simple way is to use negative indexing or a prefix,
+                # but for simplicity, we'll just add to the list.
+                # The main screenshot list will be sorted by timestamp later if needed.
+                screenshot_info = self._save_screenshot(
+                    frame, video_name, f"segment_start_{i}", timestamp, 
+                    output_path, 1.0 # Similarity score 1.0 for forced captures
+                )
+                screenshots.append(screenshot_info)
+            else:
+                logger.warning(f"Could not extract frame for segment start at {timestamp}s")
+
+        # Existing logic for detecting visual changes within segments or throughout the video
+        # This part needs to be adapted to consider speech segments' durations
         
         frame_interval = int(fps * self.config['frame_check_interval'])
         resize_dimensions = self.config['resize_for_comparison']
         
-        screenshots = []
         previous_frame_gray = None
         frame_count = 0
-        last_screenshot_time = -self.min_time_between_shots
-        
-        # Always capture first frame
-        first_frame_captured = False
-        
-        try:
-            while True:
+        last_screenshot_time = -self.min_time_between_shots # Initialize to allow first capture
+
+        # Iterate through speech segments to detect changes within them
+        for segment in self.speech_segments:
+            segment_start_time = segment.get('start')
+            segment_end_time = segment.get('end')
+
+            if segment_start_time is None or segment_end_time is None:
+                logger.warning(f"Segment missing start or end time: {segment}")
+                continue
+
+            # Set video capture to the start of the current segment
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(segment_start_time * fps))
+            current_time_in_segment = segment_start_time
+            
+            # Process frames within the current segment
+            while current_time_in_segment < segment_end_time:
                 ret, frame = cap.read()
                 if not ret:
-                    break
+                    break # End of video or error
+
+                # Only process frames at the specified interval for efficiency
+                # And ensure we are within the current segment's time boundaries
+                current_frame_num_abs = int(cap.get(cv2.CAP_PROP_POS_FRAMES)) -1 # current frame number
                 
-                timestamp = frame_count / fps
-                
-                # Check frame at intervals
-                if frame_count % frame_interval == 0:
-                    # Convert to grayscale and resize for comparison
+                if current_frame_num_abs % frame_interval == 0:
                     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                     resized_gray = cv2.resize(gray_frame, resize_dimensions)
                     
-                    should_capture = False
-                    similarity_score = 1.0
-                    
-                    if not first_frame_captured:
-                        # Always capture first frame
-                        should_capture = True
-                        first_frame_captured = True
-                        logger.debug("Capturing first frame")
-                    elif previous_frame_gray is not None:
-                        # Calculate similarity with previous frame
+                    similarity_score = 1.0 # Default for first frame of segment or if no previous
+                    if previous_frame_gray is not None:
                         similarity_score = ssim(resized_gray, previous_frame_gray)
+
+                    # Capture if significant change and enough time has passed since last screenshot
+                    if (similarity_score < self.similarity_threshold and
+                        current_time_in_segment - last_screenshot_time >= self.min_time_between_shots):
                         
-                        # Check for scene change
-                        if (similarity_score < self.similarity_threshold and 
-                            timestamp - last_screenshot_time >= self.min_time_between_shots):
-                            should_capture = True
-                            logger.debug(f"Scene change at {timestamp:.2f}s (similarity: {similarity_score:.3f})")
-                    
-                    if should_capture:
-                        screenshot_info = self._save_screenshot(
-                            frame, video_name, len(screenshots), timestamp, 
-                            output_path, similarity_score
+                        # Avoid duplicate if a segment-start screenshot was already taken at this exact time
+                        is_duplicate_of_segment_start = any(
+                            s['timestamp'] == current_time_in_segment and s['filename'].startswith(f"{video_name}_screenshot_segment_start_")
+                            for s in screenshots
                         )
-                        screenshots.append(screenshot_info)
-                        last_screenshot_time = timestamp
+                        if not is_duplicate_of_segment_start:
+                            screenshot_info = self._save_screenshot(
+                                frame, video_name, f"change_{len(screenshots)}", current_time_in_segment,
+                                output_path, similarity_score
+                            )
+                            screenshots.append(screenshot_info)
+                            last_screenshot_time = current_time_in_segment
                     
                     previous_frame_gray = resized_gray
                 
-                frame_count += 1
-        
-        finally:
-            cap.release()
-        
-        # Ensure we have at least one screenshot
-        if not screenshots:
-            logger.warning("No screenshots captured, creating one from first frame")
-            cap = cv2.VideoCapture(video_path)
+                current_time_in_segment = (cap.get(cv2.CAP_PROP_POS_FRAMES)) / fps
+                if current_time_in_segment >= segment_end_time : # ensure we don't go past segment end
+                    break
+
+
+        # Ensure first frame of the video is captured if no speech segments and no other screenshots
+        if not screenshots and not self.speech_segments:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             ret, frame = cap.read()
             if ret:
                 screenshot_info = self._save_screenshot(
-                    frame, video_name, 0, 0.0, output_path, 1.0
+                    frame, video_name, "initial_0", 0.0, output_path, 1.0
                 )
                 screenshots.append(screenshot_info)
-            cap.release()
         
+        cap.release()
+        
+        # Sort all screenshots by timestamp
+        screenshots.sort(key=lambda s: s['timestamp'])
+        # Re-index after sorting to ensure sequential numbering for change-detected ones if desired,
+        # or maintain unique IDs like "segment_start_X" and "change_Y"
+        # For simplicity, we'll keep the mixed naming for now. If a strict numerical index is needed:
+        # for idx, s_info in enumerate(screenshots):
+        # s_info['index'] = idx 
+        # s_info['filename'] = f"{video_name}_screenshot_{idx:03d}_{format_timestamp_seconds(s_info['timestamp']).replace(':', '-')}.jpg"
+        # s_info['filepath'] = str(output_path / s_info['filename'])
+        # This would require re-saving or renaming files if filenames need to reflect the new index.
+        # Current _save_screenshot uses the passed index directly.
+
         logger.info(f"Extracted {len(screenshots)} screenshots from {video_name}")
         return screenshots
     
-    def _save_screenshot(self, frame: np.ndarray, video_name: str, index: int, 
+    def _save_screenshot(self, frame: np.ndarray, video_name: str, index: any, # Index can be string or int
                         timestamp: float, output_dir: Path, similarity_score: float) -> Dict:
         """
         Save a screenshot and return its metadata.
@@ -163,7 +211,11 @@ class VideoScreenshotExtractor:
         """
         # Generate filename with timestamp
         timestamp_str = format_timestamp_seconds(timestamp).replace(':', '-')
-        filename = f"{video_name}_screenshot_{index:03d}_{timestamp_str}.jpg"
+        # Adapt filename if index is a string (e.g., "segment_start_0" or "change_12")
+        if isinstance(index, str):
+             filename = f"{video_name}_screenshot_{index}_{timestamp_str}.jpg"
+        else: # Original behavior if index is an int
+            filename = f"{video_name}_screenshot_{index:03d}_{timestamp_str}.jpg"
         filepath = output_dir / filename
         
         # Save image with good quality

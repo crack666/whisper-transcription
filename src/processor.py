@@ -48,11 +48,8 @@ class StudyMaterialProcessor:
             config=self.config['transcription']
         )
         
-        self.screenshot_extractor = VideoScreenshotExtractor(
-            similarity_threshold=self.config['screenshots']['similarity_threshold'],
-            min_time_between_shots=self.config['screenshots']['min_time_between_shots'],
-            config=self.config['screenshots']
-        )
+        # VideoScreenshotExtractor is initialized later, once speech_segments are available
+        self.screenshot_extractor = None
         
         self.pdf_matcher = None  # Will be initialized when studies_dir is provided
         self.html_generator = HTMLReportGenerator()
@@ -139,16 +136,39 @@ class StudyMaterialProcessor:
             
             # Step 2: Transcribe audio
             logger.info("Step 2/5: Transcribing audio...")
-            transcription_result = self.transcriber.transcribe_audio_file(audio_path)
+            transcription_result = self.transcriber.transcribe_audio_file_enhanced(audio_path)
+
+            # Save transcription result as a side-car JSON file
+            input_file_path = Path(video_path)
+            sidecar_transcription_path = input_file_path.with_suffix('.json')
+            try:
+                with open(sidecar_transcription_path, 'w', encoding='utf-8') as f:
+                    json.dump(transcription_result, f, indent=2, ensure_ascii=False, default=str)
+                logger.info(f"Transcription saved as side-car JSON: {sidecar_transcription_path}")
+            except Exception as e:
+                logger.error(f"Failed to save side-car transcription JSON to {sidecar_transcription_path}: {e}")
+
+            # Initialize ScreenshotExtractor with actual speech segments
+            self.screenshot_extractor = VideoScreenshotExtractor(
+                similarity_threshold=self.config['screenshots']['similarity_threshold'],
+                min_time_between_shots=self.config['screenshots']['min_time_between_shots'],
+                config=self.config['screenshots'],
+                speech_segments=transcription_result.get('segments', []) # Pass actual segments
+            )
             
             # Step 3: Extract screenshots (if enabled and if it's a video file)
             screenshots = []
             is_video_file = self._is_video_file(video_path)
             
             if self.config['output'].get('extract_screenshots', True) and is_video_file:
-                logger.info("Step 3/5: Extracting screenshots...")
-                screenshots_dir = video_output_dir / "screenshots"
-                screenshots = self.screenshot_extractor.extract_screenshots(video_path, str(screenshots_dir))
+                if self.screenshot_extractor: # Check if initialized
+                    logger.info("Step 3/5: Extracting screenshots...")
+                    screenshots_dir = video_output_dir / "screenshots"
+                    # Pass speech_segments again or ensure it's used from init
+                    # The extractor is now initialized with segments, so this call is fine
+                    screenshots = self.screenshot_extractor.extract_screenshots(video_path, str(screenshots_dir))
+                else:
+                    logger.warning("Screenshot extractor not initialized, skipping screenshot extraction.")
             elif not is_video_file:
                 logger.info("Step 3/5: Skipping screenshot extraction (audio-only file)")
             else:

@@ -295,7 +295,12 @@ def main():
             
             print(f"\n✅ Processing completed!")
             print(f"   Video: {Path(args.input).name}")
-            print(f"   Duration: {result['transcription']['total_duration']/1000/60:.1f} minutes")
+            # Correctly access duration from the new structure and convert seconds to minutes
+            duration_seconds = result.get('transcription', {}).get('speech_pattern_analysis', {}).get('duration_seconds')
+            if duration_seconds is not None:
+                print(f"   Duration: {duration_seconds / 60:.1f} minutes")
+            else:
+                print("   Duration: Not available")
             print(f"   Screenshots: {len(result['screenshots'])}")
             print(f"   Related PDFs: {len(result['related_pdfs'])}")
             print(f"   Processing time: {result['processing_time_seconds']:.1f} seconds")
