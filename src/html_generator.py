@@ -424,12 +424,49 @@ class HTMLReportGenerator:
                     tabContent.innerHTML = '<div class="section"><h2>🖼️ Screenshots</h2><div class="empty-state"><p>Keine Screenshots verfügbar.</p></div></div>';
                     return;
                 }
-                let imagesHtml = screenshots.map(ss => `
-                    <div class="stats-card">
-                        <img src="${ss.path}" alt="Screenshot at ${formatTimestamp(ss.timestamp)}" style="max-width: 100%; height: auto; border-radius: 4px;">
-                        <p style="text-align: center; margin-top: 5px;">Timestamp: ${formatTimestamp(ss.timestamp)}</p>
-                    </div>
-                `).join('');
+                let imagesHtml = screenshots.map(ss => {
+                    // Fix: Use correct property (filepath instead of path) and handle relative paths
+                    let imagePath = ss.filepath || ss.path;
+                    if (imagePath) {
+                        // Convert absolute paths from project root to relative paths from HTML file location
+                        // The HTML file is located in "results/[specific-folder]/", so we need to extract just the relative path
+                        
+                        // Handle Windows-style paths with backslashes
+                        if (imagePath.includes('\\\\')) {
+                            const pathParts = imagePath.split('\\\\');
+                            // Find "screenshots" folder and construct relative path from there
+                            const screenshotsIndex = pathParts.findIndex(part => part === 'screenshots');
+                            if (screenshotsIndex > 0) {
+                                imagePath = pathParts.slice(screenshotsIndex).join('/');
+                            }
+                        }
+                        // Handle Unix-style paths with forward slashes
+                        else if (imagePath.includes('/')) {
+                            const pathParts = imagePath.split('/');
+                            const screenshotsIndex = pathParts.findIndex(part => part === 'screenshots');
+                            if (screenshotsIndex > 0) {
+                                imagePath = pathParts.slice(screenshotsIndex).join('/');
+                            }
+                        }
+                        
+                        // Fallback: if path still starts with results/, remove that part and everything up to screenshots
+                        if (imagePath.startsWith('results/') || imagePath.startsWith('results\\\\')) {
+                            const match = imagePath.match(/results[\\\/][^\\\/]+[\\\/](screenshots.*)/);
+                            if (match) {
+                                imagePath = match[1].replace(/\\\\/g, '/');
+                            }
+                        }
+                        
+                        // Final cleanup: ensure forward slashes for web compatibility
+                        imagePath = imagePath.replace(/\\\\/g, '/');
+                    }
+                    return `
+                        <div class="stats-card">
+                            <img src="${imagePath}" alt="Screenshot at ${formatTimestamp(ss.timestamp)}" style="max-width: 100%; height: auto; border-radius: 4px;" onerror="this.style.display='none'; this.nextElementSibling.innerHTML='❌ Image not found: ${imagePath}';">
+                            <p style="text-align: center; margin-top: 5px;">Timestamp: ${formatTimestamp(ss.timestamp)}</p>
+                        </div>
+                    `;
+                }).join('');
                 tabContent.innerHTML = `<div class="section"><h2>🖼️ Screenshots</h2><div style="display: flex; flex-wrap: wrap; gap: 15px;">${imagesHtml}</div></div>`;
             }
 
