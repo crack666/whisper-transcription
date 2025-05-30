@@ -148,6 +148,50 @@ class HTMLReportGenerator:
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 0.9em; }
         th { background-color: #007bff; color: white; }
         tr:nth-child(even) { background-color: #f2f2f2; }
+        
+        /* Timeline-based UI Styles */
+        .timeline-container { background: #f8f9fa; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+        .timeline-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .timeline-controls { display: flex; gap: 10px; align-items: center; }
+        .timeline-button { background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .timeline-button:hover { background: #0056b3; }
+        .timeline-button:disabled { background: #6c757d; cursor: not-allowed; }
+        .timeline-info { font-size: 14px; color: #666; }
+        
+        .timeline-main { display: flex; gap: 20px; height: 500px; }
+        .timeline-sidebar { width: 300px; display: flex; flex-direction: column; }
+        .timeline-content { flex: 1; display: flex; flex-direction: column; }
+        
+        .timeline-slider-container { margin-bottom: 15px; }
+        .timeline-slider { width: 100%; height: 8px; background: #ddd; border-radius: 4px; outline: none; cursor: pointer; }
+        .timeline-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; background: #007bff; border-radius: 50%; cursor: pointer; }
+        .timeline-slider::-moz-range-thumb { width: 20px; height: 20px; background: #007bff; border-radius: 50%; cursor: pointer; border: none; }
+        
+        .timeline-time-display { text-align: center; font-family: monospace; font-size: 16px; margin-bottom: 10px; color: #333; }
+        
+        .segments-list { flex: 1; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; background: white; }
+        .segment-item { padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; transition: background-color 0.2s; }
+        .segment-item:hover { background-color: #f8f9fa; }
+        .segment-item.active { background-color: #e3f2fd; border-left: 4px solid #007bff; }
+        .segment-time { font-family: monospace; font-size: 12px; color: #666; margin-bottom: 4px; }
+        .segment-text { font-size: 14px; line-height: 1.4; }
+        
+        .screenshot-viewer { flex: 1; display: flex; flex-direction: column; border: 1px solid #ddd; border-radius: 4px; background: white; }
+        .screenshot-header { padding: 15px; border-bottom: 1px solid #eee; background: #f8f9fa; }
+        .screenshot-content { flex: 1; padding: 15px; display: flex; align-items: center; justify-content: center; background: #fafafa; }
+        .screenshot-image { max-width: 100%; max-height: 100%; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .screenshot-placeholder { color: #999; font-style: italic; text-align: center; }
+        
+        .timeline-stats { display: flex; gap: 20px; margin-top: 15px; font-size: 14px; color: #666; }
+        .timeline-stat { display: flex; align-items: center; gap: 5px; }
+        
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .timeline-main { flex-direction: column; height: auto; }
+            .timeline-sidebar { width: 100%; }
+            .screenshot-viewer { height: 300px; }
+        }
+        
         /* Add more styles as needed */
         '''
 
@@ -280,26 +324,214 @@ class HTMLReportGenerator:
         return '''
         // JavaScript code for HTML report interactivity
 
+        // --- Global Timeline Variables and Functions ---
+        // Helper functions (moved to global scope for HTML event handlers)
+        function formatTimestamp(seconds) {
+            if (isNaN(seconds) || seconds === null) return "00:00:00";
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            return [h, m, s].map(v => v.toString().padStart(2, '0')).join(':');
+        }
+        
+        function getConfidenceClass(confidence) {
+            if (confidence > 0.8) return "high-confidence";
+            if (confidence > 0.6) return "medium-confidence";
+            return "low-confidence";
+        }
+
+        // Timeline functionality
+        let currentTimelineData = {
+            segments: [],
+            screenshots: [],
+            currentTime: 0,
+            currentSegmentIndex: -1,
+            totalDuration: 0,
+            isPlaying: false,
+            playInterval: null
+        };
+        
+        function initializeTimeline(segments, screenshots, totalDuration) {
+            currentTimelineData = {
+                segments: segments,
+                screenshots: screenshots,
+                currentTime: 0,
+                currentSegmentIndex: -1,
+                totalDuration: totalDuration,
+                isPlaying: false,
+                playInterval: null
+            };
+            
+            // Set initial state
+            timelineSeek(0);
+        }
+        
+        function timelineSeek(time) {
+            const timeValue = parseFloat(time);
+            currentTimelineData.currentTime = timeValue;
+            
+            // Update slider
+            const slider = document.getElementById('timelineSlider');
+            if (slider) slider.value = timeValue;
+            
+            // Update time display
+            updateTimeDisplay(timeValue);
+            
+            // Find current segment
+            const segmentIndex = findSegmentAtTime(timeValue);
+            updateCurrentSegment(segmentIndex);
+            
+            // Find and display screenshot
+            updateScreenshotForTime(timeValue);
+        }
+        
+        function findSegmentAtTime(time) {
+            for (let i = 0; i < currentTimelineData.segments.length; i++) {
+                const segment = currentTimelineData.segments[i];
+                if (time >= segment.start && time <= segment.end) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+        
+        function updateCurrentSegment(segmentIndex) {
+            currentTimelineData.currentSegmentIndex = segmentIndex;
+            
+            // Update segment highlighting
+            const segmentItems = document.querySelectorAll('.segment-item');
+            segmentItems.forEach((item, index) => {
+                if (index === segmentIndex) {
+                    item.classList.add('active');
+                    // Scroll into view
+                    item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+            
+            // Update current segment stat
+            const statElement = document.getElementById('currentSegmentStat');
+            if (statElement) {
+                if (segmentIndex >= 0) {
+                    statElement.innerHTML = `<span>🎯</span><span>Segment: ${segmentIndex + 1}/${currentTimelineData.segments.length}</span>`;
+                } else {
+                    statElement.innerHTML = `<span>🎯</span><span>Segment: -</span>`;
+                }
+            }
+        }
+        
+        function updateScreenshotForTime(time) {
+            // Find the best screenshot for this time
+            let bestScreenshot = null;
+            let minTimeDiff = Infinity;
+            
+            for (const screenshot of currentTimelineData.screenshots) {
+                const timeDiff = Math.abs(screenshot.timestamp - time);
+                if (timeDiff < minTimeDiff) {
+                    minTimeDiff = timeDiff;
+                    bestScreenshot = screenshot;
+                }
+            }
+            
+            const screenshotContent = document.getElementById('screenshotContent');
+            const screenshotTitle = document.getElementById('screenshotTitle');
+            const screenshotInfo = document.getElementById('screenshotInfo');
+            
+            if (bestScreenshot && minTimeDiff <= 30) { // Show screenshot if within 30 seconds
+                // Fix screenshot path
+                let screenshotPath = bestScreenshot.filepath || bestScreenshot.path || '';
+                if (screenshotPath) {
+                    // Extract path from 'screenshots' folder onward
+                    const screenshotsIndex = screenshotPath.indexOf('screenshots');
+                    if (screenshotsIndex !== -1) {
+                        screenshotPath = screenshotPath.substring(screenshotsIndex).replace(/\\\\/g, '/');
+                    }
+                }
+                
+                screenshotContent.innerHTML = `
+                    <img src="${screenshotPath}" alt="Screenshot at ${formatTimestamp(bestScreenshot.timestamp)}" 
+                         class="screenshot-image" 
+                         onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\\"screenshot-placeholder\\">🚫 Screenshot konnte nicht geladen werden</div>';">
+                `;
+                
+                screenshotTitle.textContent = `Screenshot bei ${formatTimestamp(bestScreenshot.timestamp)}`;
+                screenshotInfo.textContent = `Zeitdifferenz: ${minTimeDiff.toFixed(1)}s | Datei: ${bestScreenshot.filename || 'Unbekannt'}`;
+            } else {
+                screenshotContent.innerHTML = '<div class="screenshot-placeholder">🖼️ Kein Screenshot für diese Zeit verfügbar</div>';
+                screenshotTitle.textContent = 'Kein Screenshot verfügbar';
+                screenshotInfo.textContent = `Aktuelle Zeit: ${formatTimestamp(time)}`;
+            }
+        }
+        
+        function updateTimeDisplay(time) {
+            const timeDisplay = document.getElementById('timeDisplay');
+            if (timeDisplay) {
+                const totalMinutes = Math.floor(currentTimelineData.totalDuration / 60);
+                const totalSeconds = Math.floor(currentTimelineData.totalDuration % 60);
+                timeDisplay.textContent = `${formatTimestamp(time)} / ${String(totalMinutes).padStart(2, '0')}:${String(totalSeconds).padStart(2, '0')}:00`;
+            }
+        }
+        
+        function timelineJumpToSegment(segmentIndex) {
+            if (segmentIndex >= 0 && segmentIndex < currentTimelineData.segments.length) {
+                const segment = currentTimelineData.segments[segmentIndex];
+                timelineSeek(segment.start);
+            }
+        }
+        
+        function timelineGoToPrevious() {
+            if (currentTimelineData.currentSegmentIndex > 0) {
+                timelineJumpToSegment(currentTimelineData.currentSegmentIndex - 1);
+            } else if (currentTimelineData.segments.length > 0) {
+                timelineJumpToSegment(0);
+            }
+        }
+        
+        function timelineGoToNext() {
+            if (currentTimelineData.currentSegmentIndex < currentTimelineData.segments.length - 1) {
+                timelineJumpToSegment(currentTimelineData.currentSegmentIndex + 1);
+            } else if (currentTimelineData.segments.length > 0) {
+                timelineJumpToSegment(currentTimelineData.segments.length - 1);
+            }
+        }
+        
+        function timelineReset() {
+            timelineSeek(0);
+            if (currentTimelineData.isPlaying) {
+                timelineTogglePlay();
+            }
+        }
+        
+        function timelineTogglePlay() {
+            const playBtn = document.getElementById('playPauseBtn');
+            
+            if (currentTimelineData.isPlaying) {
+                // Pause
+                clearInterval(currentTimelineData.playInterval);
+                currentTimelineData.isPlaying = false;
+                if (playBtn) playBtn.textContent = '▶️ Play';
+            } else {
+                // Play
+                currentTimelineData.isPlaying = true;
+                if (playBtn) playBtn.textContent = '⏸️ Pause';
+                
+                currentTimelineData.playInterval = setInterval(() => {
+                    const newTime = currentTimelineData.currentTime + 1; // Advance 1 second
+                    if (newTime >= currentTimelineData.totalDuration) {
+                        timelineTogglePlay(); // Auto-pause at end
+                        return;
+                    }
+                    timelineSeek(newTime);
+                }, 1000); // Update every second
+            }
+        }
+
         // Wait for the DOM to be fully loaded before executing scripts
         document.addEventListener('DOMContentLoaded', function() {
             const allData = JSON.parse(document.getElementById('allData').textContent);
             const fileSelector = document.getElementById('fileSelector');
             const activeFileContainer = document.getElementById('active_file_container');
-
-            // --- Helper Functions ---
-            function formatTimestamp(seconds) {
-                if (isNaN(seconds) || seconds === null) return "00:00:00";
-                const h = Math.floor(seconds / 3600);
-                const m = Math.floor((seconds % 3600) / 60);
-                const s = Math.floor(seconds % 60);
-                return [h, m, s].map(v => v.toString().padStart(2, '0')).join(':');
-            }
-            
-            function getConfidenceClass(confidence) {
-                if (confidence > 0.8) return "high-confidence";
-                if (confidence > 0.6) return "medium-confidence";
-                return "low-confidence";
-            }
 
             // --- Content Update Functions ---
             function updateHeader(fileData) {
@@ -488,24 +720,103 @@ class HTMLReportGenerator:
                 tabContent.innerHTML = `<div class="section"><h2>📄 PDFs</h2>${pdfsHtml}</div>`;
             }
             
-            function updateMappingTab(mappingData) {
+            function updateMappingTab(mappingData, segments, screenshots) {
                 const tabContent = document.getElementById('active_mapping');
-                if (!mappingData || mappingData.length === 0) {
-                    tabContent.innerHTML = '<div class="section"><h2>🔗 Mapping</h2><div class="empty-state"><p>Keine Mapping-Daten verfügbar.</p></div></div>';
+                
+                // Prepare data for timeline
+                const timelineSegments = segments || [];
+                const timelineScreenshots = screenshots || [];
+                
+                if (!timelineSegments.length && !timelineScreenshots.length) {
+                    tabContent.innerHTML = '<div class="section"><h2>🔗 Timeline Navigation</h2><div class="empty-state"><p>Keine Daten für Timeline verfügbar.</p></div></div>';
                     return;
                 }
-                let mappingHtml = '<table><thead><tr><th>Screenshot Zeitstempel</th><th>Screenshot Pfad</th><th>Transkript Segment</th><th>Segment Zeit</th></tr></thead><tbody>';
-                mappingData.forEach(mapItem => {
-                    mappingHtml += `
-                        <tr>
-                            <td>${formatTimestamp(mapItem.screenshot_timestamp)}</td>
-                            <td><img src="${mapItem.screenshot_path}" alt="SS" style="max-width: 100px; height: auto;"></td>
-                            <td>${mapItem.transcript_segment_text}</td>
-                            <td>[${formatTimestamp(mapItem.segment_start)} - ${formatTimestamp(mapItem.segment_end)}]</td>
-                        </tr>`;
-                });
-                mappingHtml += '</tbody></table>';
-                tabContent.innerHTML = `<div class="section"><h2>🔗 Mapping</h2>${mappingHtml}</div>`;
+                
+                // Calculate total duration
+                const totalDuration = timelineSegments.length > 0 ? timelineSegments[timelineSegments.length - 1].end : 0;
+                const totalMinutes = Math.floor(totalDuration / 60);
+                const totalSeconds = Math.floor(totalDuration % 60);
+                
+                // Generate timeline HTML
+                tabContent.innerHTML = `
+                    <div class="section">
+                        <h2>🔗 Timeline Navigation</h2>
+                        <div class="timeline-container">
+                            <div class="timeline-header">
+                                <div class="timeline-info">
+                                    <strong>Video-ähnliche Navigation durch ${timelineSegments.length} Transkript-Segmente</strong>
+                                </div>
+                                <div class="timeline-controls">
+                                    <button class="timeline-button" onclick="timelineGoToPrevious()">⏮️ Vorheriges</button>
+                                    <button class="timeline-button" onclick="timelineTogglePlay()" id="playPauseBtn">▶️ Play</button>
+                                    <button class="timeline-button" onclick="timelineGoToNext()">⏭️ Nächstes</button>
+                                    <button class="timeline-button" onclick="timelineReset()">🔄 Reset</button>
+                                </div>
+                            </div>
+                            
+                            <div class="timeline-slider-container">
+                                <input type="range" id="timelineSlider" class="timeline-slider" 
+                                       min="0" max="${totalDuration}" value="0" step="0.1"
+                                       oninput="timelineSeek(this.value)">
+                            </div>
+                            
+                            <div class="timeline-time-display" id="timeDisplay">
+                                00:00:00 / ${String(totalMinutes).padStart(2, '0')}:${String(totalSeconds).padStart(2, '0')}:00
+                            </div>
+                            
+                            <div class="timeline-main">
+                                <div class="timeline-sidebar">
+                                    <h4 style="margin: 0 0 10px 0;">📝 Segmente</h4>
+                                    <div class="segments-list" id="segmentsList">
+                                        ${timelineSegments.map((segment, index) => `
+                                            <div class="segment-item" data-index="${index}" data-start="${segment.start}" data-end="${segment.end}"
+                                                 onclick="timelineJumpToSegment(${index})">
+                                                <div class="segment-time">${formatTimestamp(segment.start)} - ${formatTimestamp(segment.end)}</div>
+                                                <div class="segment-text">${(segment.text || '').substring(0, 100)}${segment.text && segment.text.length > 100 ? '...' : ''}</div>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                                
+                                <div class="timeline-content">
+                                    <div class="screenshot-viewer">
+                                        <div class="screenshot-header">
+                                            <strong id="screenshotTitle">Screenshot wird geladen...</strong>
+                                            <div id="screenshotInfo" style="font-size: 12px; color: #666; margin-top: 4px;"></div>
+                                        </div>
+                                        <div class="screenshot-content" id="screenshotContent">
+                                            <div class="screenshot-placeholder">
+                                                🖼️ Bewegen Sie den Slider oder klicken Sie auf ein Segment, um Screenshots anzuzeigen
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="timeline-stats">
+                                <div class="timeline-stat">
+                                    <span>📊</span>
+                                    <span>${timelineSegments.length} Segmente</span>
+                                </div>
+                                <div class="timeline-stat">
+                                    <span>🖼️</span>
+                                    <span>${timelineScreenshots.length} Screenshots</span>
+                                </div>
+                                <div class="timeline-stat">
+                                    <span>⏱️</span>
+                                    <span>${Math.floor(totalDuration / 60)} min ${Math.floor(totalDuration % 60)} sec</span>
+                                </div>
+                                <div class="timeline-stat" id="currentSegmentStat">
+                                    <span>🎯</span>
+                                    <span>Segment: -</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // Initialize timeline functionality
+                initializeTimeline(timelineSegments, timelineScreenshots, totalDuration);
             }
 
 
@@ -540,7 +851,14 @@ class HTMLReportGenerator:
                 updateStatisticsTab(selectedFileData);
                 updateScreenshotsTab(selectedFileData.screenshots);
                 updatePDFsTab(selectedFileData.related_pdfs);
-                updateMappingTab(selectedFileData.screenshot_transcript_mapping);
+                
+                // Extract segments for timeline
+                const transcriptionData = selectedFileData.transcription && selectedFileData.transcription.transcription ? 
+                                        selectedFileData.transcription.transcription : selectedFileData.transcription;
+                const segments = transcriptionData ? transcriptionData.segments || [] : [];
+                const screenshots = selectedFileData.screenshots || [];
+                
+                updateMappingTab(selectedFileData.screenshot_transcript_mapping, segments, screenshots);
                 
                 // Ensure the first tab is active after changing file
                 showTab('active_transcript', 'active_file_container');
