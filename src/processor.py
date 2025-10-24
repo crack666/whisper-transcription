@@ -149,11 +149,13 @@ class StudyMaterialProcessor:
                 logger.error(f"Failed to save side-car transcription JSON to {sidecar_transcription_path}: {e}")
 
             # Initialize ScreenshotExtractor with actual speech segments
+            # Extract segments from nested structure: transcription_result -> transcription -> segments
+            speech_segments = transcription_result.get('transcription', {}).get('segments', [])
             self.screenshot_extractor = VideoScreenshotExtractor(
                 similarity_threshold=self.config['screenshots']['similarity_threshold'],
                 min_time_between_shots=self.config['screenshots']['min_time_between_shots'],
                 config=self.config['screenshots'],
-                speech_segments=transcription_result.get('segments', []) # Pass actual segments
+                speech_segments=speech_segments # Pass actual segments
             )
             
             # Step 3: Extract screenshots (if enabled and if it's a video file)

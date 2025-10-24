@@ -82,3 +82,6 @@ Thumbs.db
 
 # Studies directory – ignore all content
 studies/*
+
+output/*
+results/*
