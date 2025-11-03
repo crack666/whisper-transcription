@@ -452,7 +452,7 @@ class HTMLReportGenerator:
                 screenshotContent.innerHTML = `
                     <img src="${screenshotPath}" alt="Screenshot at ${formatTimestamp(bestScreenshot.timestamp)}" 
                          class="screenshot-image" 
-                         onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\\"screenshot-placeholder\\">🚫 Screenshot konnte nicht geladen werden</div>';">
+                         onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\\"screenshot-placeholder\\">🚫 Screenshot konnte nicht geladen werden</div>'">
                 `;
                 
                 screenshotTitle.textContent = `Screenshot bei ${formatTimestamp(bestScreenshot.timestamp)}`;
