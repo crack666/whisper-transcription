@@ -83,5 +83,16 @@ Thumbs.db
 # Studies directory – ignore all content
 studies/*
 
+# Output directories - all generated content
 output/*
 results/*
+
+# Video Test Files (Large Binaries)
+*.webm
+*.m4v
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.flv
+*.wmv
