@@ -70,11 +70,14 @@ class EnhancedAudioTranscriber:
         self.segmentation_handler = SegmentationHandler(self.config) # Initialize SegmentationHandler
         self.waveform_analyzer = WaveformAnalyzer(config=self.config) # Initialize WaveformAnalyzer
         
-        logger.info(f"Initialized EnhancedAudioTranscriber")
+        logger.info(f"Initialized EnhancedAudioTranscriber with segmentation_mode={self.config.get('segmentation_mode', 'defensive_silence')}, disable_segmentation={self.config.get('disable_segmentation', False)}")
     
     def _get_enhanced_config(self) -> Dict:
         """Get enhanced configuration optimized for robust transcription."""
         return {
+            # Segmentation control
+            'disable_segmentation': False,          # NEW: Set to True to process entire file without splitting
+            
             # Segmentation mode - Options: 'fixed_time', 'defensive_silence', 'precision_waveform'
             'segmentation_mode': 'defensive_silence', 
             'fixed_time_duration': 30000,              # 30 seconds per segment when using fixed_time mode
@@ -327,6 +330,93 @@ class EnhancedAudioTranscriber:
             "words_per_minute": len(words) / (duration_seconds / 60) if duration_seconds > 0 else 0
         }
     
+    def _transcribe_whole_file(self, audio_file: str, analysis_data: Dict, start_time: float) -> Dict[str, Any]:
+        """
+        Transcribe entire audio file without segmentation (bypass splitting).
+        Whisper will handle the audio as one piece and return its own segments.
+        
+        Args:
+            audio_file: Path to audio file
+            analysis_data: Speech pattern analysis results
+            start_time: Start time for tracking processing duration
+            
+        Returns:
+            Complete transcription results in the same format as segmented version
+        """
+        logger.info("🚀 Processing entire file through Whisper (no pre-segmentation)")
+        
+        # Gather transcription configuration
+        transcription_config_params = {
+            "model_name": self.model_name,
+            "device": self.device,
+            "language": self.language,
+            "segmentation_mode": "none",  # Indicate no pre-segmentation
+            "parameters": {
+                "whole_file_processing": True,
+                "note": "Audio processed as single unit - Whisper internal segmentation only"
+            }
+        }
+        
+        try:
+            # Transcribe the entire file
+            logger.info(f"Starting Whisper transcription for: {audio_file}")
+            transcription_result = self.transcribe_with_enhanced_options(audio_file)
+            
+            # Extract segments from Whisper's result
+            whisper_segments = transcription_result.get("segments", [])
+            logger.info(f"Whisper returned {len(whisper_segments)} internal segments")
+            
+            # Convert Whisper segments to our format
+            all_transcribed_segments = []
+            full_text = transcription_result.get("text", "").strip()
+            
+            for seg in whisper_segments:
+                output_segment = {
+                    "start": seg.get("start", 0),
+                    "end": seg.get("end", 0),
+                    "text": seg.get("text", "").strip(),
+                    "confidence": seg.get("avg_logprob", 0.0),  # Whisper uses avg_logprob
+                    "quality_score": 1.0,  # Default for whole-file processing
+                    "warnings": []
+                }
+                all_transcribed_segments.append(output_segment)
+            
+            # Create the nested 'transcription' dictionary
+            transcription_details = {
+                "text": full_text,
+                "segments": all_transcribed_segments,
+                "language": self.language,
+                "processing_time_seconds": time.time() - start_time
+            }
+            
+            # Consolidate all data
+            final_results = {
+                "transcription": transcription_details,
+                "speech_pattern_analysis": analysis_data,
+                "transcription_config": transcription_config_params,
+                "audio_file_path": audio_file
+            }
+            
+            logger.info(f"✅ Whole-file transcription completed in {time.time() - start_time:.2f}s")
+            return final_results
+            
+        except Exception as e:
+            logger.error(f"❌ Error during whole-file transcription: {e}")
+            # Return error result
+            return {
+                "transcription": {
+                    "text": "",
+                    "segments": [],
+                    "language": self.language,
+                    "processing_time_seconds": time.time() - start_time,
+                    "error": str(e)
+                },
+                "speech_pattern_analysis": analysis_data,
+                "transcription_config": transcription_config_params,
+                "audio_file_path": audio_file,
+                "warnings": [f"Whole-file transcription failed: {e}"]
+            }
+    
     def transcribe_audio_file_enhanced(self, audio_file: str) -> Dict[str, Any]:
         """
         Enhanced transcription workflow optimized for slow speakers.
@@ -346,6 +436,11 @@ class EnhancedAudioTranscriber:
         
         # Step 1: Analyze speech patterns
         analysis_data = self.analyze_speech_patterns(audio_file) # Renamed to avoid conflict with the final output dict key
+        
+        # NEW: Check if segmentation should be bypassed
+        if self.config.get('disable_segmentation', False):
+            logger.info("⚡ Segmentation DISABLED - Processing entire file through Whisper")
+            return self._transcribe_whole_file(audio_file, analysis_data, start_time_transcription)
         
         # Step 2: Choose segmentation method based on configuration
         segmentation_mode = self.config.get('segmentation_mode', 'defensive_silence')

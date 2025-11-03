@@ -258,12 +258,18 @@ class StudyMaterialProcessor:
         # Process each video
         all_results = []
         for i, video_path in enumerate(video_files, 1):
+            file_start_time = time.time()
             logger.info(f"Processing video {i}/{len(video_files)}: {video_path.name}")
+            print(f"\n[{i}/{len(video_files)}] 🎬 {video_path.name} - Started at {time.strftime('%H:%M:%S')}")
             
             try:
                 result = self.process_video(str(video_path), output_dir, studies_dir)
+                file_time = time.time() - file_start_time
+                print(f"     ✅ Completed in {file_time/60:.2f} minutes ({file_time:.1f}s)")
                 all_results.append(result)
             except Exception as e:
+                file_time = time.time() - file_start_time
+                print(f"     ❌ Failed after {file_time/60:.2f} minutes: {e}")
                 logger.error(f"Failed to process {video_path.name}: {e}")
                 # Continue with next video
                 continue

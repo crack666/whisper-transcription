@@ -9,6 +9,7 @@ import argparse
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -85,6 +86,10 @@ Examples:
                                    help="Whisper model (default: large-v3)")
     transcription_group.add_argument("--device", type=str, default=None,
                                    help="Device for inference (cpu, cuda, etc.)")
+    transcription_group.add_argument("--no-segmentation", action="store_true",
+                                   help="Process entire file without splitting (faster for modern hardware)")
+    transcription_group.add_argument("--whole-file", action="store_true",
+                                   help="Alias for --no-segmentation")
     
     # Screenshot settings
     screenshot_group = parser.add_argument_group("Screenshot Settings")
@@ -156,6 +161,7 @@ def create_config_from_args(args) -> Dict:
             'model': args.model,
             'language': args.language,
             'device': args.device,
+            'disable_segmentation': args.no_segmentation or args.whole_file,  # NEW: Support both flags
         },
         'screenshots': {
             'similarity_threshold': args.similarity_threshold,
@@ -272,14 +278,28 @@ def main():
         # Create output directory
         os.makedirs(args.output, exist_ok=True)
         
+        # Track total processing time
+        total_start_time = time.time()
+        
         # Process videos
         if args.batch:
             logger.info(f"Starting batch processing of directory: {args.input}")
+            print(f"\n🚀 Starting batch processing...")
+            print(f"   Mode: {'Whole-File (no segmentation)' if args.no_segmentation or args.whole_file else 'Segmented'}")
+            print(f"   Input: {args.input}")
+            print(f"   Output: {args.output}")
+            print(f"   Started at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            
             results = processor.process_batch(args.input, args.output, args.studies)
+            
+            total_time = time.time() - total_start_time
             
             print(f"\n✅ Batch processing completed!")
             print(f"   Processed: {len(results)} videos")
+            print(f"   Total time: {total_time/60:.2f} minutes ({total_time:.1f} seconds)")
+            print(f"   Average per video: {total_time/len(results)/60:.2f} minutes" if results else "")
             print(f"   Output directory: {os.path.abspath(args.output)}")
+            print(f"   Completed at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
             
             if len(results) > 1:
                 index_path = os.path.join(args.output, "index.html")
@@ -288,6 +308,11 @@ def main():
             
         else:
             logger.info(f"Processing single video: {args.input}")
+            print(f"\n🚀 Starting video processing...")
+            print(f"   Mode: {'Whole-File (no segmentation)' if args.no_segmentation or args.whole_file else 'Segmented'}")
+            print(f"   Input: {args.input}")
+            print(f"   Started at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            
             result = processor.process_video(args.input, args.output, args.studies)
             
             video_name = Path(args.input).stem
