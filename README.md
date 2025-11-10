@@ -17,6 +17,7 @@
 *   **Vollständige Verarbeitung** - Audio + Video + Screenshots + HTML-Reports
 *   **Batch-Verarbeitung** - Automatische Verarbeitung ganzer Ordner mit Index-Seite
 *   **Interaktive Multi-Datei HTML-Reports:** Analysieren Sie Ergebnisse mehrerer Dateien in einem einzigen Report mit einfacher Navigation. Inklusive Option zur schnellen Neugenerierung aus gespeicherten JSON-Ergebnissen.
+*   **🆕 Text-Export-Tool:** Extrahieren Sie reine Transkript-Texte für Weiterverarbeitung, LLM-Analyse oder externe Tools (mit/ohne Timestamps, Metadaten, Batch-Modus).
 *   **🆕 Regenerations-Tools:** Screenshots und HTML-Reports können einzeln ohne Neutranskription regeneriert werden.
 *   **🆕 Robuste HTML-Reports:** Korrigierte Darstellung von Transkript-Segmenten, PDF-Links und Header-Informationen.
 
@@ -39,9 +40,36 @@ python regenerate_screenshots.py "results/VideoName/VideoName_analysis.json" --s
 # HTML-Report aus vorhandenen Daten neu erstellen
 python regenerate_report.py
 ```
+
+### 📝 Reiner Text-Export (NEU)
+Extrahieren Sie den puren Transkriptionstext für Weiterverarbeitung, Analyse oder externe Tools:
+
+```bash
+# Einzelne Datei - Einfacher Text-Export
+python extract_transcript_text.py --input results/VideoName/VideoName_analysis.json
+# Output: results/VideoName/VideoName_transcript.txt
+
+# Mit Zeitstempeln
+python extract_transcript_text.py --input analysis.json --timestamps
+# Output: [00:05] Transkriptionstext hier...
+
+# Mit Segment-Nummern und Metadaten
+python extract_transcript_text.py --input analysis.json --segments --metadata
+# Output: [1] [00:05] Text... mit Header (Dauer, Wörter, Confidence)
+
+# Batch: Alle Transkripte aus results/ extrahieren
+python extract_transcript_text.py --batch --input results/
+# Erstellt .txt-Dateien für alle _analysis.json Files
+
+# Custom Output-Pfad
+python extract_transcript_text.py --input analysis.json --output my_transcript.txt
+```
+
 **Nutzen Sie diese Tools um:**
 - Screenshot-Parameter ohne Neutranskription anzupassen
 - HTML-Reports nach System-Updates zu aktualisieren
+- **Transkripte für LLMs, Suche oder externe Analyse exportieren**
+- **Reine Text-Dateien für Copy-Paste oder Weiterverarbeitung erstellen**
 - Schnell verschiedene Einstellungen zu testen
 - Zeit und Rechenressourcen zu sparen
 
@@ -179,6 +207,21 @@ python study_processor_v2.py \
   --input lecture.mp4 \
   --output ./results \
   --studies ./pdf_materials
+```
+
+### 📝 Reiner Text-Export (für Weiterverarbeitung)
+```bash
+# Nach der Verarbeitung: Transkript als einfache Textdatei exportieren
+python extract_transcript_text.py --input results/LectureName/LectureName_analysis.json
+
+# Batch: Alle Transkripte extrahieren
+python extract_transcript_text.py --batch --input results/
+
+# Mit Zeitstempeln (nützlich für Zitate/Referenzen)
+python extract_transcript_text.py --input results/LectureName/LectureName_analysis.json --timestamps
+
+# Für LLM/AI-Verarbeitung (mit Metadaten)
+python extract_transcript_text.py --input analysis.json --metadata --output for_analysis.txt
 ```
 
 ---
