@@ -126,8 +126,10 @@ class StudyMaterialProcessor:
             self.set_studies_directory(studies_dir)
         
         # Prepare output structure
-        video_name = sanitize_filename(Path(video_path).stem)
         video_path_obj = Path(video_path)
+        # Use full filename (with extension) for better sorting in file explorer
+        video_name = sanitize_filename(video_path_obj.name)  # e.g., "Video Name.mp4"
+        video_name_stem = sanitize_filename(video_path_obj.stem)  # e.g., "Video Name" (for folder names)
         
         # Determine output directory:
         # - If output_dir is None: use source directory, screenshots in {name}_screenshots/
@@ -135,10 +137,11 @@ class StudyMaterialProcessor:
         if output_dir is None:
             # Save in source directory - reports go there, screenshots in subdirectory
             video_output_dir = video_path_obj.parent.resolve()
+            # Use full video name (with .mp4) for screenshot folder
             screenshots_subdir_name = f"{video_name}_screenshots"
         else:
             # Use specified output directory structure
-            video_output_dir = ensure_directory(os.path.join(output_dir, video_name))
+            video_output_dir = ensure_directory(os.path.join(output_dir, video_name_stem))
             screenshots_subdir_name = "screenshots"
         
         logger.info(f"Output directory: {video_output_dir}")
@@ -415,7 +418,8 @@ class StudyMaterialProcessor:
         # Save JSON results if enabled
         if self.config['output']['generate_json']:
             print(f"💾 Saving analysis data...")
-            json_path = output_dir / f"{video_name}_analysis.json"
+            # Use .mp4.json instead of _analysis.json for better sorting
+            json_path = output_dir / f"{video_name}.json"
             with open(json_path, 'w', encoding='utf-8') as f:
                 json.dump(result, f, indent=2, ensure_ascii=False, default=str)
             logger.info(f"JSON results saved to: {json_path}")

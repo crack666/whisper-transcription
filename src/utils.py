@@ -128,6 +128,7 @@ def check_dependencies():
 def sanitize_filename(filename: str) -> str:
     """
     Sanitize filename for safe file system operations.
+    Preserves spaces for better readability in file explorer.
     
     Args:
         filename: Original filename
@@ -138,9 +139,10 @@ def sanitize_filename(filename: str) -> str:
     # Remove or replace problematic characters
     import re
     # Keep alphanumeric, spaces, dots, dashes, underscores
-    sanitized = re.sub(r'[^\w\s\.\-_]', '_', filename)
-    # Replace multiple spaces/underscores with single ones
-    sanitized = re.sub(r'[\s_]+', '_', sanitized)
+    # Replace only truly problematic characters (like /, \, :, *, ?, ", <, >, |)
+    sanitized = re.sub(r'[<>:"/\\|?*]', '_', filename)
+    # Collapse multiple spaces into single space
+    sanitized = re.sub(r'\s+', ' ', sanitized)
     # Remove leading/trailing dots or spaces
     sanitized = sanitized.strip(' ._')
     return sanitized
