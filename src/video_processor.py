@@ -102,20 +102,21 @@ class VideoScreenshotExtractor:
                 segment_frames = int((segment_end - segment_start) * fps)
                 total_frames_to_process += segment_frames
         
-        # Progress bar for screenshot extraction
+        # Phase 1: Extract screenshots at segment starts
         print(f"\n📸 Extracting screenshots from {len(self.speech_segments)} speech segments...")
         print(f"   Video duration: {duration_seconds:.1f}s, Processing {total_frames_to_process:,} frames")
         print(f"   Phase 1/2: Capturing segment start frames ({len(segment_start_timestamps)} positions)...")
         
-        pbar = tqdm(total=total_frames_to_process, unit='frames', desc="Screenshot extraction", 
-                   bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
+        # Progress bar for Phase 1
+        pbar_phase1 = tqdm(total=len(segment_start_timestamps), unit='positions', desc="Phase 1: Segment starts",
+                          bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
         
-        # Extract screenshots at segment starts (with progress updates)
-        segment_start_progress = 0
+        # Extract screenshots at segment starts
         for i, timestamp in enumerate(segment_start_timestamps):
             # Skip timestamps beyond video duration
             if timestamp >= duration_seconds:
                 logger.debug(f"Skipping segment start at {timestamp:.2f}s (beyond video duration {duration_seconds:.2f}s)")
+                pbar_phase1.update(1)
                 continue
                 
             frame_number = int(timestamp * fps)
@@ -128,16 +129,19 @@ class VideoScreenshotExtractor:
                     output_path, 1.0 # Similarity score 1.0 for forced captures
                 )
                 screenshots.append(screenshot_info)
-                # Update progress bar with actual progress
-                segment_start_progress += 1
-                pbar.set_postfix({'phase': f'segment starts ({segment_start_progress}/{len(segment_start_timestamps)})', 'screenshots': len(screenshots)}, refresh=True)
             else:
                 logger.warning(f"Could not extract frame for segment start at {timestamp:.2f}s")
-
-        # Existing logic for detecting visual changes within segments or throughout the video
-        # This part needs to be adapted to consider speech segments' durations
+            
+            pbar_phase1.update(1)
         
+        pbar_phase1.close()
+
+        # Phase 2: Detect visual changes within segments
         print(f"   Phase 2/2: Detecting visual changes within segments...")
+        
+        # Progress bar for Phase 2
+        pbar = tqdm(total=total_frames_to_process, unit='frames', desc="Phase 2: Visual changes", 
+                   bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
         
         frame_interval = int(fps * self.config['frame_check_interval'])
         resize_dimensions = self.config['resize_for_comparison']
