@@ -9,6 +9,7 @@ from typing import Dict, List, Tuple, Optional
 from pathlib import Path
 import os
 from skimage.metrics import structural_similarity as ssim
+from tqdm import tqdm
 
 from config import DEFAULT_CONFIG
 from utils import format_timestamp_seconds, ensure_directory, sanitize_filename
@@ -83,26 +84,64 @@ class VideoScreenshotExtractor:
         # Extract screenshot at the beginning of each speech segment
         segment_start_timestamps = sorted(list(set([seg['start'] for seg in self.speech_segments if 'start' in seg])))
         
+        # Calculate total frames to process for progress tracking (clip to video duration)
+        total_frames_to_process = 0
+        for segment in self.speech_segments:
+            segment_start = segment.get('start', 0)
+            segment_end = segment.get('end', 0)
+            
+            # Skip segments completely outside video duration
+            if segment_start >= duration_seconds:
+                continue
+            
+            # Clip segment end to video duration
+            segment_end = min(segment_end, duration_seconds)
+            
+            # Only count frames within valid range
+            if segment_end > segment_start:
+                segment_frames = int((segment_end - segment_start) * fps)
+                total_frames_to_process += segment_frames
+        
+        # Phase 1: Extract screenshots at segment starts
+        print(f"\n📸 Extracting screenshots from {len(self.speech_segments)} speech segments...")
+        print(f"   Video duration: {duration_seconds:.1f}s, Processing {total_frames_to_process:,} frames")
+        print(f"   Phase 1/2: Capturing segment start frames ({len(segment_start_timestamps)} positions)...")
+        
+        # Progress bar for Phase 1
+        pbar_phase1 = tqdm(total=len(segment_start_timestamps), unit='positions', desc="Phase 1: Segment starts",
+                          bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
+        
+        # Extract screenshots at segment starts
         for i, timestamp in enumerate(segment_start_timestamps):
+            # Skip timestamps beyond video duration
+            if timestamp >= duration_seconds:
+                logger.debug(f"Skipping segment start at {timestamp:.2f}s (beyond video duration {duration_seconds:.2f}s)")
+                pbar_phase1.update(1)
+                continue
+                
             frame_number = int(timestamp * fps)
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
             ret, frame = cap.read()
+            
             if ret:
-                # Use a unique index for these segment-start screenshots
-                # to avoid collision with change-detected screenshots.
-                # A simple way is to use negative indexing or a prefix,
-                # but for simplicity, we'll just add to the list.
-                # The main screenshot list will be sorted by timestamp later if needed.
                 screenshot_info = self._save_screenshot(
                     frame, video_name, f"segment_start_{i}", timestamp, 
                     output_path, 1.0 # Similarity score 1.0 for forced captures
                 )
                 screenshots.append(screenshot_info)
             else:
-                logger.warning(f"Could not extract frame for segment start at {timestamp}s")
+                logger.warning(f"Could not extract frame for segment start at {timestamp:.2f}s")
+            
+            pbar_phase1.update(1)
+        
+        pbar_phase1.close()
 
-        # Existing logic for detecting visual changes within segments or throughout the video
-        # This part needs to be adapted to consider speech segments' durations
+        # Phase 2: Detect visual changes within segments
+        print(f"   Phase 2/2: Detecting visual changes within segments...")
+        
+        # Progress bar for Phase 2
+        pbar = tqdm(total=total_frames_to_process, unit='frames', desc="Phase 2: Visual changes", 
+                   bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
         
         frame_interval = int(fps * self.config['frame_check_interval'])
         resize_dimensions = self.config['resize_for_comparison']
@@ -120,15 +159,29 @@ class VideoScreenshotExtractor:
                 logger.warning(f"Segment missing start or end time: {segment}")
                 continue
 
+            # Skip segments that start beyond video duration
+            if segment_start_time >= duration_seconds:
+                logger.debug(f"Skipping segment starting at {segment_start_time:.2f}s (beyond video duration)")
+                continue
+            
+            # Clip segment end to video duration
+            segment_end_time = min(segment_end_time, duration_seconds)
+
             # Set video capture to the start of the current segment
             cap.set(cv2.CAP_PROP_POS_FRAMES, int(segment_start_time * fps))
             current_time_in_segment = segment_start_time
             
             # Process frames within the current segment
+            frames_processed_in_segment = 0
             while current_time_in_segment < segment_end_time:
                 ret, frame = cap.read()
                 if not ret:
                     break # End of video or error
+
+                frames_processed_in_segment += 1
+                # Update progress bar every N frames to avoid slowdown
+                if frames_processed_in_segment % 30 == 0:
+                    pbar.update(30)
 
                 # Only process frames at the specified interval for efficiency
                 # And ensure we are within the current segment's time boundaries
@@ -158,14 +211,23 @@ class VideoScreenshotExtractor:
                             )
                             screenshots.append(screenshot_info)
                             last_screenshot_time = current_time_in_segment
+                            # Update progress bar description with screenshot count
+                            pbar.set_postfix({'screenshots': len(screenshots)}, refresh=False)
                     
                     previous_frame_gray = resized_gray
                 
                 current_time_in_segment = (cap.get(cv2.CAP_PROP_POS_FRAMES)) / fps
                 if current_time_in_segment >= segment_end_time : # ensure we don't go past segment end
                     break
+            
+            # Update progress bar with remaining frames from this segment
+            remaining_frames = frames_processed_in_segment % 30
+            if remaining_frames > 0:
+                pbar.update(remaining_frames)
 
-
+        # Close progress bar
+        pbar.close()
+        
         # Ensure first frame of the video is captured if no speech segments and no other screenshots
         if not screenshots and not self.speech_segments:
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -190,6 +252,7 @@ class VideoScreenshotExtractor:
         # This would require re-saving or renaming files if filenames need to reflect the new index.
         # Current _save_screenshot uses the passed index directly.
 
+        print(f"✅ Screenshot extraction completed: {len(screenshots)} screenshots saved")
         logger.info(f"Extracted {len(screenshots)} screenshots from {video_name}")
         return screenshots
     

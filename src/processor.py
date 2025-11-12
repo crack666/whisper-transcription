@@ -14,6 +14,7 @@ from .enhanced_transcriber import EnhancedAudioTranscriber
 from .video_processor import VideoScreenshotExtractor
 from .pdf_matcher import PDFMatcher
 from .html_generator import HTMLReportGenerator
+from .benchmark_logger import BenchmarkLogger
 from .utils import (
     extract_audio_from_video, 
     ensure_directory, 
@@ -53,6 +54,9 @@ class StudyMaterialProcessor:
         
         self.pdf_matcher = None  # Will be initialized when studies_dir is provided
         self.html_generator = HTMLReportGenerator()
+        
+        # Initialize benchmark logger
+        self.benchmark_logger = BenchmarkLogger()
         
         logger.info("StudyMaterialProcessor initialized")
     
@@ -105,21 +109,44 @@ class StudyMaterialProcessor:
         """
         start_time = time.time()
         
+        # Start benchmark logging
+        self.benchmark_logger.start_run(video_path, self.config)
+        
         logger.info(f"Starting processing of video: {video_path}")
         
         # Validate inputs
         if not os.path.exists(video_path):
-            raise FileNotFoundError(f"Video file not found: {video_path}")
+            error_msg = f"Video file not found: {video_path}"
+            self.benchmark_logger.log_error(error_msg, "validation")
+            self.benchmark_logger.end_run(success=False)
+            raise FileNotFoundError(error_msg)
         
         # Set studies directory if provided
         if studies_dir:
             self.set_studies_directory(studies_dir)
         
         # Prepare output structure
-        video_name = sanitize_filename(Path(video_path).stem)
-        video_output_dir = ensure_directory(os.path.join(output_dir, video_name))
+        video_path_obj = Path(video_path)
+        # Use full filename (with extension) for better sorting in file explorer
+        video_name = sanitize_filename(video_path_obj.name)  # e.g., "Video Name.mp4"
+        video_name_stem = sanitize_filename(video_path_obj.stem)  # e.g., "Video Name" (for folder names)
+        
+        # Determine output directory:
+        # - If output_dir is None: use source directory
+        # - Otherwise: use output_dir/{video_name_stem}/
+        # Screenshots always use {video_name}_screenshots/ for consistency
+        if output_dir is None:
+            # Save in source directory
+            video_output_dir = video_path_obj.parent.resolve()
+        else:
+            # Use specified output directory with subdirectory per video
+            video_output_dir = ensure_directory(os.path.join(output_dir, video_name_stem))
+        
+        # Always use full video name (with .mp4) for screenshot folder - consistent across all modes
+        screenshots_subdir_name = f"{video_name}_screenshots"
         
         logger.info(f"Output directory: {video_output_dir}")
+        logger.info(f"Screenshots subdirectory: {screenshots_subdir_name}")
         
         try:
             # Get video information
@@ -131,13 +158,24 @@ class StudyMaterialProcessor:
             logger.info(f"Estimated processing time: {time_estimate['estimated_total_minutes']:.1f} minutes")
             
             # Step 1: Extract audio from video
+            self.benchmark_logger.start_phase("audio_extraction")
             logger.info("Step 1/5: Extracting audio from video...")
             audio_path = extract_audio_from_video(video_path)
+            self.benchmark_logger.end_phase("audio_extraction")
             
             # Step 2: Transcribe audio
+            self.benchmark_logger.start_phase("transcription")
             logger.info("Step 2/5: Transcribing audio...")
             transcription_result = self.transcriber.transcribe_audio_file_enhanced(audio_path)
 
+            # Log transcription metadata
+            speech_segments = transcription_result.get('transcription', {}).get('segments', [])
+            word_count = sum(len(seg.get('text', '').split()) for seg in speech_segments)
+            self.benchmark_logger.end_phase("transcription", metadata={
+                "segment_count": len(speech_segments),
+                "word_count": word_count
+            })
+            
             # Save transcription result as a side-car JSON file
             input_file_path = Path(video_path)
             sidecar_transcription_path = input_file_path.with_suffix('.json')
@@ -149,8 +187,6 @@ class StudyMaterialProcessor:
                 logger.error(f"Failed to save side-car transcription JSON to {sidecar_transcription_path}: {e}")
 
             # Initialize ScreenshotExtractor with actual speech segments
-            # Extract segments from nested structure: transcription_result -> transcription -> segments
-            speech_segments = transcription_result.get('transcription', {}).get('segments', [])
             self.screenshot_extractor = VideoScreenshotExtractor(
                 similarity_threshold=self.config['screenshots']['similarity_threshold'],
                 min_time_between_shots=self.config['screenshots']['min_time_between_shots'],
@@ -164,11 +200,16 @@ class StudyMaterialProcessor:
             
             if self.config['output'].get('extract_screenshots', True) and is_video_file:
                 if self.screenshot_extractor: # Check if initialized
+                    self.benchmark_logger.start_phase("screenshot_extraction")
+                    print(f"\n📸 Step 3/5: Extracting screenshots...")
                     logger.info("Step 3/5: Extracting screenshots...")
-                    screenshots_dir = video_output_dir / "screenshots"
+                    screenshots_dir = video_output_dir / screenshots_subdir_name
                     # Pass speech_segments again or ensure it's used from init
                     # The extractor is now initialized with segments, so this call is fine
                     screenshots = self.screenshot_extractor.extract_screenshots(video_path, str(screenshots_dir))
+                    self.benchmark_logger.end_phase("screenshot_extraction", metadata={
+                        "screenshot_count": len(screenshots)
+                    })
                 else:
                     logger.warning("Screenshot extractor not initialized, skipping screenshot extraction.")
             elif not is_video_file:
@@ -179,12 +220,19 @@ class StudyMaterialProcessor:
             # Step 4: Find related PDFs
             related_pdfs = []
             if self.pdf_matcher:
+                self.benchmark_logger.start_phase("pdf_matching")
+                print(f"\n📚 Step 4/5: Finding related PDFs...")
                 logger.info("Step 4/5: Finding related PDFs...")
                 related_pdfs = self.pdf_matcher.find_related_pdfs(video_path)
+                self.benchmark_logger.end_phase("pdf_matching", metadata={
+                    "pdf_count": len(related_pdfs)
+                })
             else:
                 logger.info("Step 4/5: PDF matching disabled (no studies directory)")
             
             # Step 5: Map screenshots to transcript
+            self.benchmark_logger.start_phase("mapping_and_report_generation")
+            print(f"\n🔗 Step 5/5: Creating mappings and generating reports...")
             logger.info("Step 5/5: Creating screenshot-transcript mappings...")
             screenshot_transcript_mapping = self._map_screenshots_to_transcript(
                 screenshots, transcription_result
@@ -210,6 +258,18 @@ class StudyMaterialProcessor:
             
             # Save results
             self._save_results(result, video_output_dir, video_name)
+            self.benchmark_logger.end_phase("mapping_and_report_generation")
+            
+            # End benchmark logging with success
+            self.benchmark_logger.end_run(success=True, result_data={
+                "word_count": word_count,
+                "segment_count": len(speech_segments),
+                "screenshot_count": len(screenshots),
+                "pdf_count": len(related_pdfs)
+            })
+            
+            # Add benchmark data to result for HTML display
+            result["benchmark"] = self.benchmark_logger.current_run
             
             # Cleanup if requested
             if self.config['output']['cleanup_audio'] and os.path.exists(audio_path):
@@ -217,10 +277,17 @@ class StudyMaterialProcessor:
                 logger.info("Cleaned up extracted audio file")
             
             logger.info(f"Processing completed in {processing_time:.2f} seconds")
+            
+            # Print quick benchmark summary
+            print(f"\n📊 Performance: {processing_time:.1f}s total ({video_info['duration_seconds']/processing_time:.2f}x realtime)")
+            
             return result
             
         except Exception as e:
-            logger.error(f"Error processing video {video_path}: {e}")
+            error_msg = f"Error processing video {video_path}: {e}"
+            logger.error(error_msg)
+            self.benchmark_logger.log_error(str(e), "processing")
+            self.benchmark_logger.end_run(success=False)
             raise
     
     def process_batch(self, input_dir: str, output_dir: str, 
@@ -345,18 +412,112 @@ class StudyMaterialProcessor:
             output_dir: Output directory
             video_name: Sanitized video name
         """
+        # Ensure output directory exists
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
         # Save JSON results if enabled
         if self.config['output']['generate_json']:
-            json_path = output_dir / f"{video_name}_analysis.json"
+            print(f"💾 Saving analysis data...")
+            
+            # Convert screenshot filepaths to be relative to the JSON file location
+            if result.get('screenshots'):
+                for screenshot in result['screenshots']:
+                    if 'filepath' in screenshot:
+                        abs_path = Path(screenshot['filepath'])
+                        try:
+                            # Make path relative to output_dir where JSON is saved
+                            rel_path = abs_path.relative_to(output_dir)
+                            screenshot['filepath'] = str(rel_path).replace('\\', '/')
+                        except ValueError:
+                            # If relative path fails, just use the filename with folder
+                            screenshot['filepath'] = f"{abs_path.parent.name}/{abs_path.name}"
+            
+            # Use .mp4.json instead of _analysis.json for better sorting
+            json_path = output_dir / f"{video_name}.json"
             with open(json_path, 'w', encoding='utf-8') as f:
                 json.dump(result, f, indent=2, ensure_ascii=False, default=str)
             logger.info(f"JSON results saved to: {json_path}")
         
         # Generate HTML report if enabled
         if self.config['output']['generate_html']:
-            html_path = output_dir / f"{video_name}_report.html"
+            print(f"📄 Generating HTML report...")
+            html_path = output_dir / f"{video_name}.html"
             self.html_generator.generate_report(result, str(html_path))
+            print(f"✅ HTML report generated: {html_path.name}")
             logger.info(f"HTML report saved to: {html_path}")
+        
+        # Extract plain text transcript (always enabled)
+        if result.get('transcription'):
+            print(f"📝 Extracting plain text transcript...")
+            try:
+                text_content = self._extract_plain_text(result['transcription'])
+                txt_path = output_dir / f"{video_name}.txt"
+                with open(txt_path, 'w', encoding='utf-8') as f:
+                    f.write(text_content)
+                print(f"✅ Plain text transcript saved: {txt_path.name}")
+                logger.info(f"Plain text transcript saved to: {txt_path}")
+            except Exception as e:
+                logger.error(f"Failed to extract plain text transcript: {e}")
+    
+    def _extract_plain_text(self, transcription_data: Dict) -> str:
+        """
+        Extract plain text from transcription data.
+        
+        Args:
+            transcription_data: Transcription dictionary
+            
+        Returns:
+            Formatted plain text transcript
+        """
+        # Handle nested transcription structure
+        actual_transcription = transcription_data.get('transcription', transcription_data)
+        segments = actual_transcription.get('segments', [])
+        
+        if not segments:
+            return ""
+        
+        # Build text with timestamps
+        lines = []
+        lines.append("=" * 80)
+        lines.append("TRANSCRIPTION")
+        lines.append("=" * 80)
+        lines.append("")
+        
+        # Add metadata if available
+        if actual_transcription.get('language'):
+            lines.append(f"Language: {actual_transcription['language']}")
+        
+        duration = segments[-1].get('end', 0) if segments else 0
+        lines.append(f"Duration: {duration / 60:.1f} minutes ({duration:.1f} seconds)")
+        lines.append(f"Segments: {len(segments)}")
+        
+        word_count = sum(len(seg.get('text', '').split()) for seg in segments)
+        lines.append(f"Words: {word_count}")
+        lines.append("")
+        lines.append("=" * 80)
+        lines.append("")
+        
+        # Add segments with timestamps
+        for i, segment in enumerate(segments, 1):
+            start = segment.get('start', 0)
+            end = segment.get('end', 0)
+            text = segment.get('text', '').strip()
+            
+            if not text:
+                continue
+            
+            # Format timestamp
+            start_h = int(start // 3600)
+            start_m = int((start % 3600) // 60)
+            start_s = int(start % 60)
+            
+            timestamp = f"[{start_h:02d}:{start_m:02d}:{start_s:02d}]"
+            
+            lines.append(f"{timestamp} {text}")
+            lines.append("")
+        
+        return "\n".join(lines)
     
     def analyze_video_complexity(self, video_path: str) -> Dict:
         """

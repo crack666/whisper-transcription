@@ -87,6 +87,29 @@ studies/*
 output/*
 results/*
 
+# Benchmark logs (individual performance data)
+benchmark_logs/
+*.jsonl
+
+# Screenshots in all subdirectories
+**/*_screenshots/
+**/screenshots/
+**/*.jpg
+
+# Generated analysis and transcription files in subdirectories
+mad/*.json
+mad/*.html
+mad/*.txt
+mad/*.wav
+pqm/*.json
+pqm/*.html
+pqm/*.txt
+pqm/*.wav
+datenbanken/*.json
+datenbanken/*.html
+datenbanken/*.txt
+datenbanken/*.wav
+
 # Video Test Files (Large Binaries)
 *.webm
 *.m4v

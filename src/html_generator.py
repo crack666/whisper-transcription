@@ -194,6 +194,70 @@ class HTMLReportGenerator:
         
         /* Add more styles as needed */
         '''
+    
+    def _generate_benchmark_info_html(self, benchmark_data: Dict) -> str:
+        """
+        Generate HTML for benchmark information display in header.
+        
+        Args:
+            benchmark_data: Benchmark data from BenchmarkLogger
+            
+        Returns:
+            HTML string with benchmark info
+        """
+        if not benchmark_data:
+            return ""
+        
+        # Extract key metrics
+        total_duration = benchmark_data.get("total_duration_seconds", 0)
+        media_duration = benchmark_data.get("media_info", {}).get("duration_seconds", 0)
+        
+        # Hardware info
+        hw_info = benchmark_data.get("hardware_info", {})
+        cpu_name = hw_info.get("cpu", "N/A")
+        gpu_name = hw_info.get("gpu", "N/A")
+        
+        # Config info
+        config = benchmark_data.get("config", {})
+        model_name = config.get("model", {}).get("name", "N/A")
+        device = config.get("model", {}).get("device", "N/A")
+        
+        # Metrics
+        metrics = benchmark_data.get("metrics", {})
+        rtf = metrics.get("real_time_factor", 0)
+        speedup = metrics.get("speedup", 0)
+        
+        # Results
+        results = benchmark_data.get("results", {})
+        word_count = results.get("word_count", 0)
+        screenshot_count = results.get("screenshot_count", 0)
+        
+        # Format processing time
+        processing_time_str = f"{total_duration:.1f}s"
+        if total_duration >= 60:
+            minutes = int(total_duration // 60)
+            seconds = total_duration % 60
+            processing_time_str = f"{minutes}m {seconds:.0f}s"
+        
+        return f'''
+            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.3);">
+                <div style="font-size: 0.95em; margin-bottom: 8px;"><strong>⚡ Performance</strong></div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; font-size: 0.85em;">
+                    <div style="background-color: rgba(255,255,255,0.1); padding: 6px 10px; border-radius: 4px;">
+                        <strong>Processing Time:</strong> {processing_time_str} ({speedup:.2f}x realtime)
+                    </div>
+                    <div style="background-color: rgba(255,255,255,0.1); padding: 6px 10px; border-radius: 4px;">
+                        <strong>Model:</strong> {model_name} ({device.upper()})
+                    </div>
+                    <div style="background-color: rgba(255,255,255,0.1); padding: 6px 10px; border-radius: 4px;">
+                        <strong>CPU:</strong> {cpu_name}
+                    </div>
+                    <div style="background-color: rgba(255,255,255,0.1); padding: 6px 10px; border-radius: 4px;">
+                        <strong>GPU:</strong> {gpu_name}
+                    </div>
+                </div>
+            </div>
+        '''
 
     def _generate_body_content(self, first_result_data: dict, report_title_base: str) -> str:
         """Generates the initial HTML structure for the report body."""
@@ -213,6 +277,10 @@ class HTMLReportGenerator:
         language = first_result_data.get("transcription_config", {}).get("language") or first_result_data.get("transcription", {}).get("language", "N/A")
         screenshots_count = len(first_result_data.get("screenshots", []))
         pdfs_count = len(first_result_data.get("related_pdfs", []))
+        
+        # Extract benchmark data if available
+        benchmark_data = first_result_data.get("benchmark", {})
+        benchmark_html = self._generate_benchmark_info_html(benchmark_data) if benchmark_data else ""
 
         return f'''
     <div class="container" id="active_file_container">
@@ -226,6 +294,7 @@ class HTMLReportGenerator:
                 <div id="active_info_screenshotsCount_container"><strong>Screenshots:</strong> <span id="active_info_screenshotsCount">{screenshots_count}</span></div>
                 <div id="active_info_pdfsCount_container"><strong>PDFs:</strong> <span id="active_info_pdfsCount">{pdfs_count}</span></div>
             </div>
+            {benchmark_html}
         </div>
 
         <div class="file-selector-container">
@@ -321,7 +390,7 @@ class HTMLReportGenerator:
         # The all_analysis_results are embedded in the HTML separately and parsed by this JS.
         # This method now primarily returns the static JS code.
         # The actual data (all_analysis_results) is picked up by the JS from the <script id="allData"> tag.
-        return '''
+        return r'''
         // JavaScript code for HTML report interactivity
 
         // --- Global Timeline Variables and Functions ---
@@ -439,20 +508,39 @@ class HTMLReportGenerator:
             const screenshotInfo = document.getElementById('screenshotInfo');
             
             if (bestScreenshot && minTimeDiff <= 30) { // Show screenshot if within 30 seconds
-                // Fix screenshot path
+                // Fix screenshot path - support both screenshots and name_screenshots folders
                 let screenshotPath = bestScreenshot.filepath || bestScreenshot.path || '';
                 if (screenshotPath) {
-                    // Extract path from 'screenshots' folder onward
-                    const screenshotsIndex = screenshotPath.indexOf('screenshots');
-                    if (screenshotsIndex !== -1) {
-                        screenshotPath = screenshotPath.substring(screenshotsIndex).replace(/\\\\/g, '/');
+                    // Convert backslashes to forward slashes
+                    screenshotPath = screenshotPath.replace(/\\/g, '/');
+                    
+                    // Extract folder ending with screenshots + filename
+                    // This matches patterns like:
+                    // - results/mad/VideoName/screenshots/file.jpg -> VideoName_screenshots/file.jpg
+                    // - VideoName_screenshots/file.jpg -> VideoName_screenshots/file.jpg
+                    const screenshotsMatch = screenshotPath.match(/([^\/]+)\/screenshots\/([^\/]+)$/i);
+                    if (screenshotsMatch) {
+                        // Use VideoName_screenshots/filename format
+                        const videoName = screenshotsMatch[1];
+                        const filename = screenshotsMatch[2];
+                        screenshotPath = videoName + '_screenshots/' + filename;
+                    } else {
+                        // Already in correct format or try to extract last folder + filename
+                        const pathParts = screenshotPath.split('/');
+                        const filename = pathParts[pathParts.length - 1];
+                        const folderName = pathParts[pathParts.length - 2] || '';
+                        if (folderName) {
+                            screenshotPath = folderName + '/' + filename;
+                        } else {
+                            screenshotPath = filename;
+                        }
                     }
                 }
                 
                 screenshotContent.innerHTML = `
                     <img src="${screenshotPath}" alt="Screenshot at ${formatTimestamp(bestScreenshot.timestamp)}" 
                          class="screenshot-image" 
-                         onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\\"screenshot-placeholder\\">🚫 Screenshot konnte nicht geladen werden</div>'">
+                         onerror="this.style.display='none'; this.parentElement.innerHTML='&lt;div class=&quot;screenshot-placeholder&quot;&gt;🚫 Screenshot konnte nicht geladen werden&lt;/div&gt;';">
                 `;
                 
                 screenshotTitle.textContent = `Screenshot bei ${formatTimestamp(bestScreenshot.timestamp)}`;
@@ -467,9 +555,8 @@ class HTMLReportGenerator:
         function updateTimeDisplay(time) {
             const timeDisplay = document.getElementById('timeDisplay');
             if (timeDisplay) {
-                const totalMinutes = Math.floor(currentTimelineData.totalDuration / 60);
-                const totalSeconds = Math.floor(currentTimelineData.totalDuration % 60);
-                timeDisplay.textContent = `${formatTimestamp(time)} / ${String(totalMinutes).padStart(2, '0')}:${String(totalSeconds).padStart(2, '0')}:00`;
+                // Use formatTimestamp for both current time and total duration
+                timeDisplay.textContent = `${formatTimestamp(time)} / ${formatTimestamp(currentTimelineData.totalDuration)}`;
             }
         }
         
@@ -660,37 +747,30 @@ class HTMLReportGenerator:
                     // Fix: Use correct property (filepath instead of path) and handle relative paths
                     let imagePath = ss.filepath || ss.path;
                     if (imagePath) {
-                        // Convert absolute paths from project root to relative paths from HTML file location
-                        // The HTML file is located in "results/[specific-folder]/", so we need to extract just the relative path
+                        // Convert backslashes to forward slashes
+                        imagePath = imagePath.replace(/\\/g, '/');
                         
-                        // Handle Windows-style paths with backslashes
-                        if (imagePath.includes('\\\\')) {
-                            const pathParts = imagePath.split('\\\\');
-                            // Find "screenshots" folder and construct relative path from there
-                            const screenshotsIndex = pathParts.findIndex(part => part === 'screenshots');
-                            if (screenshotsIndex > 0) {
-                                imagePath = pathParts.slice(screenshotsIndex).join('/');
-                            }
-                        }
-                        // Handle Unix-style paths with forward slashes
-                        else if (imagePath.includes('/')) {
+                        // Extract folder ending with screenshots + filename
+                        // This matches patterns like:
+                        // - results/mad/VideoName/screenshots/file.jpg -> VideoName_screenshots/file.jpg
+                        // - VideoName_screenshots/file.jpg -> VideoName_screenshots/file.jpg
+                        const screenshotsMatch = imagePath.match(/([^\/]+)\/screenshots\/([^\/]+)$/i);
+                        if (screenshotsMatch) {
+                            // Use VideoName_screenshots/filename format
+                            const videoName = screenshotsMatch[1];
+                            const filename = screenshotsMatch[2];
+                            imagePath = videoName + '_screenshots/' + filename;
+                        } else {
+                            // Already in correct format or try to extract last folder + filename
                             const pathParts = imagePath.split('/');
-                            const screenshotsIndex = pathParts.findIndex(part => part === 'screenshots');
-                            if (screenshotsIndex > 0) {
-                                imagePath = pathParts.slice(screenshotsIndex).join('/');
+                            const filename = pathParts[pathParts.length - 1];
+                            const folderName = pathParts[pathParts.length - 2] || '';
+                            if (folderName) {
+                                imagePath = folderName + '/' + filename;
+                            } else {
+                                imagePath = filename;
                             }
                         }
-                        
-                        // Fallback: if path still starts with results/, remove that part and everything up to screenshots
-                        if (imagePath.startsWith('results/') || imagePath.startsWith('results\\\\')) {
-                            const match = imagePath.match(/results[\\\/][^\\\/]+[\\\/](screenshots.*)/);
-                            if (match) {
-                                imagePath = match[1].replace(/\\\\/g, '/');
-                            }
-                        }
-                        
-                        // Final cleanup: ensure forward slashes for web compatibility
-                        imagePath = imagePath.replace(/\\\\/g, '/');
                     }
                     return `
                         <div class="stats-card">

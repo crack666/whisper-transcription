@@ -28,7 +28,7 @@ LANGUAGE_MAP = {
 }
 
 # Available Whisper models
-WHISPER_MODELS = ["tiny", "base", "small", "medium", "large", "large-v2", "large-v3"]
+WHISPER_MODELS = ["tiny", "base", "small", "medium", "large", "large-v2", "large-v3", "large-v3-turbo"]
 
 # Supported video file extensions
 VIDEO_EXTENSIONS = ['.mp4', '.avi', '.mov', '.mkv', '.wmv']
