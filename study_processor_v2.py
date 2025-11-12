@@ -65,8 +65,8 @@ Examples:
     # Input/Output
     parser.add_argument("--input", type=str, required=True,
                        help="Video file or directory containing videos")
-    parser.add_argument("--output", type=str, default="./output",
-                       help="Output directory (default: ./output)")
+    parser.add_argument("--output", type=str, default=None,
+                       help="Output directory (default: same directory as input file)")
     parser.add_argument("--studies", type=str, default="./studies",
                        help="Directory with study materials/PDFs (default: ./studies)")
     
@@ -275,8 +275,9 @@ def main():
             
             return
         
-        # Create output directory
-        os.makedirs(args.output, exist_ok=True)
+        # Create output directory if specified
+        if args.output:
+            os.makedirs(args.output, exist_ok=True)
         
         # Track total processing time
         total_start_time = time.time()
@@ -287,7 +288,7 @@ def main():
             print(f"\n🚀 Starting batch processing...")
             print(f"   Mode: {'Whole-File (no segmentation)' if args.no_segmentation or args.whole_file else 'Segmented'}")
             print(f"   Input: {args.input}")
-            print(f"   Output: {args.output}")
+            print(f"   Output: {args.output if args.output else 'Same as input (source directory)'}")
             print(f"   Started at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
             
             results = processor.process_batch(args.input, args.output, args.studies)
@@ -311,12 +312,14 @@ def main():
             print(f"\n🚀 Starting video processing...")
             print(f"   Mode: {'Whole-File (no segmentation)' if args.no_segmentation or args.whole_file else 'Segmented'}")
             print(f"   Input: {args.input}")
+            print(f"   Output: {args.output if args.output else 'Same as input (source directory)'}")
             print(f"   Started at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
             
             result = processor.process_video(args.input, args.output, args.studies)
             
             video_name = Path(args.input).stem
-            output_dir = os.path.join(args.output, video_name)
+            # Determine actual output directory from result
+            output_dir = result.get('output_directory', args.output if args.output else Path(args.input).parent)
             
             print(f"\n✅ Processing completed!")
             print(f"   Video: {Path(args.input).name}")
@@ -339,6 +342,10 @@ def main():
             json_file = os.path.join(output_dir, f"{video_name}_analysis.json")
             if os.path.exists(json_file):
                 print(f"   📊 JSON Data: {json_file}")
+            
+            txt_file = os.path.join(output_dir, f"{video_name}_transcript.txt")
+            if os.path.exists(txt_file):
+                print(f"   📝 Plain Text: {txt_file}")
     
     except KeyboardInterrupt:
         logger.info("Processing interrupted by user")
