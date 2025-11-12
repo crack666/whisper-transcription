@@ -111,6 +111,7 @@ class VideoScreenshotExtractor:
                    bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
         
         # Extract screenshots at segment starts (with progress updates)
+        segment_start_progress = 0
         for i, timestamp in enumerate(segment_start_timestamps):
             # Skip timestamps beyond video duration
             if timestamp >= duration_seconds:
@@ -127,10 +128,9 @@ class VideoScreenshotExtractor:
                     output_path, 1.0 # Similarity score 1.0 for forced captures
                 )
                 screenshots.append(screenshot_info)
-                # Update progress for segment start extraction (estimate 1% of total work)
-                if i % 10 == 0:  # Update every 10 segments to avoid slowdown
-                    pbar.update(0)
-                    pbar.set_postfix({'phase': 'segment starts', 'screenshots': len(screenshots)}, refresh=True)
+                # Update progress bar with actual progress
+                segment_start_progress += 1
+                pbar.set_postfix({'phase': f'segment starts ({segment_start_progress}/{len(segment_start_timestamps)})', 'screenshots': len(screenshots)}, refresh=True)
             else:
                 logger.warning(f"Could not extract frame for segment start at {timestamp:.2f}s")
 
@@ -168,13 +168,16 @@ class VideoScreenshotExtractor:
             current_time_in_segment = segment_start_time
             
             # Process frames within the current segment
+            frames_processed_in_segment = 0
             while current_time_in_segment < segment_end_time:
                 ret, frame = cap.read()
                 if not ret:
                     break # End of video or error
 
-                # Update progress bar
-                pbar.update(1)
+                frames_processed_in_segment += 1
+                # Update progress bar every N frames to avoid slowdown
+                if frames_processed_in_segment % 30 == 0:
+                    pbar.update(30)
 
                 # Only process frames at the specified interval for efficiency
                 # And ensure we are within the current segment's time boundaries
@@ -212,7 +215,11 @@ class VideoScreenshotExtractor:
                 current_time_in_segment = (cap.get(cv2.CAP_PROP_POS_FRAMES)) / fps
                 if current_time_in_segment >= segment_end_time : # ensure we don't go past segment end
                     break
-
+            
+            # Update progress bar with remaining frames from this segment
+            remaining_frames = frames_processed_in_segment % 30
+            if remaining_frames > 0:
+                pbar.update(remaining_frames)
 
         # Close progress bar
         pbar.close()

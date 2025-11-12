@@ -132,17 +132,18 @@ class StudyMaterialProcessor:
         video_name_stem = sanitize_filename(video_path_obj.stem)  # e.g., "Video Name" (for folder names)
         
         # Determine output directory:
-        # - If output_dir is None: use source directory, screenshots in {name}_screenshots/
-        # - Otherwise: use output_dir/{video_name}/, screenshots in screenshots/
+        # - If output_dir is None: use source directory
+        # - Otherwise: use output_dir/{video_name_stem}/
+        # Screenshots always use {video_name}_screenshots/ for consistency
         if output_dir is None:
-            # Save in source directory - reports go there, screenshots in subdirectory
+            # Save in source directory
             video_output_dir = video_path_obj.parent.resolve()
-            # Use full video name (with .mp4) for screenshot folder
-            screenshots_subdir_name = f"{video_name}_screenshots"
         else:
-            # Use specified output directory structure
+            # Use specified output directory with subdirectory per video
             video_output_dir = ensure_directory(os.path.join(output_dir, video_name_stem))
-            screenshots_subdir_name = "screenshots"
+        
+        # Always use full video name (with .mp4) for screenshot folder - consistent across all modes
+        screenshots_subdir_name = f"{video_name}_screenshots"
         
         logger.info(f"Output directory: {video_output_dir}")
         logger.info(f"Screenshots subdirectory: {screenshots_subdir_name}")
@@ -418,6 +419,20 @@ class StudyMaterialProcessor:
         # Save JSON results if enabled
         if self.config['output']['generate_json']:
             print(f"💾 Saving analysis data...")
+            
+            # Convert screenshot filepaths to be relative to the JSON file location
+            if result.get('screenshots'):
+                for screenshot in result['screenshots']:
+                    if 'filepath' in screenshot:
+                        abs_path = Path(screenshot['filepath'])
+                        try:
+                            # Make path relative to output_dir where JSON is saved
+                            rel_path = abs_path.relative_to(output_dir)
+                            screenshot['filepath'] = str(rel_path).replace('\\', '/')
+                        except ValueError:
+                            # If relative path fails, just use the filename with folder
+                            screenshot['filepath'] = f"{abs_path.parent.name}/{abs_path.name}"
+            
             # Use .mp4.json instead of _analysis.json for better sorting
             json_path = output_dir / f"{video_name}.json"
             with open(json_path, 'w', encoding='utf-8') as f:
@@ -427,7 +442,7 @@ class StudyMaterialProcessor:
         # Generate HTML report if enabled
         if self.config['output']['generate_html']:
             print(f"📄 Generating HTML report...")
-            html_path = output_dir / f"{video_name}_report.html"
+            html_path = output_dir / f"{video_name}.html"
             self.html_generator.generate_report(result, str(html_path))
             print(f"✅ HTML report generated: {html_path.name}")
             logger.info(f"HTML report saved to: {html_path}")
@@ -437,7 +452,7 @@ class StudyMaterialProcessor:
             print(f"📝 Extracting plain text transcript...")
             try:
                 text_content = self._extract_plain_text(result['transcription'])
-                txt_path = output_dir / f"{video_name}_transcript.txt"
+                txt_path = output_dir / f"{video_name}.txt"
                 with open(txt_path, 'w', encoding='utf-8') as f:
                     f.write(text_content)
                 print(f"✅ Plain text transcript saved: {txt_path.name}")
