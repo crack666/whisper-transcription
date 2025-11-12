@@ -264,6 +264,9 @@ class StudyMaterialProcessor:
                 "pdf_count": len(related_pdfs)
             })
             
+            # Add benchmark data to result for HTML display
+            result["benchmark"] = self.benchmark_logger.current_run
+            
             # Cleanup if requested
             if self.config['output']['cleanup_audio'] and os.path.exists(audio_path):
                 os.remove(audio_path)
