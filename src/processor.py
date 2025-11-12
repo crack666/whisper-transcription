@@ -14,6 +14,7 @@ from .enhanced_transcriber import EnhancedAudioTranscriber
 from .video_processor import VideoScreenshotExtractor
 from .pdf_matcher import PDFMatcher
 from .html_generator import HTMLReportGenerator
+from .benchmark_logger import BenchmarkLogger
 from .utils import (
     extract_audio_from_video, 
     ensure_directory, 
@@ -53,6 +54,9 @@ class StudyMaterialProcessor:
         
         self.pdf_matcher = None  # Will be initialized when studies_dir is provided
         self.html_generator = HTMLReportGenerator()
+        
+        # Initialize benchmark logger
+        self.benchmark_logger = BenchmarkLogger()
         
         logger.info("StudyMaterialProcessor initialized")
     
@@ -105,11 +109,17 @@ class StudyMaterialProcessor:
         """
         start_time = time.time()
         
+        # Start benchmark logging
+        self.benchmark_logger.start_run(video_path, self.config)
+        
         logger.info(f"Starting processing of video: {video_path}")
         
         # Validate inputs
         if not os.path.exists(video_path):
-            raise FileNotFoundError(f"Video file not found: {video_path}")
+            error_msg = f"Video file not found: {video_path}"
+            self.benchmark_logger.log_error(error_msg, "validation")
+            self.benchmark_logger.end_run(success=False)
+            raise FileNotFoundError(error_msg)
         
         # Set studies directory if provided
         if studies_dir:
@@ -144,13 +154,24 @@ class StudyMaterialProcessor:
             logger.info(f"Estimated processing time: {time_estimate['estimated_total_minutes']:.1f} minutes")
             
             # Step 1: Extract audio from video
+            self.benchmark_logger.start_phase("audio_extraction")
             logger.info("Step 1/5: Extracting audio from video...")
             audio_path = extract_audio_from_video(video_path)
+            self.benchmark_logger.end_phase("audio_extraction")
             
             # Step 2: Transcribe audio
+            self.benchmark_logger.start_phase("transcription")
             logger.info("Step 2/5: Transcribing audio...")
             transcription_result = self.transcriber.transcribe_audio_file_enhanced(audio_path)
 
+            # Log transcription metadata
+            speech_segments = transcription_result.get('transcription', {}).get('segments', [])
+            word_count = sum(len(seg.get('text', '').split()) for seg in speech_segments)
+            self.benchmark_logger.end_phase("transcription", metadata={
+                "segment_count": len(speech_segments),
+                "word_count": word_count
+            })
+            
             # Save transcription result as a side-car JSON file
             input_file_path = Path(video_path)
             sidecar_transcription_path = input_file_path.with_suffix('.json')
@@ -162,8 +183,6 @@ class StudyMaterialProcessor:
                 logger.error(f"Failed to save side-car transcription JSON to {sidecar_transcription_path}: {e}")
 
             # Initialize ScreenshotExtractor with actual speech segments
-            # Extract segments from nested structure: transcription_result -> transcription -> segments
-            speech_segments = transcription_result.get('transcription', {}).get('segments', [])
             self.screenshot_extractor = VideoScreenshotExtractor(
                 similarity_threshold=self.config['screenshots']['similarity_threshold'],
                 min_time_between_shots=self.config['screenshots']['min_time_between_shots'],
@@ -177,12 +196,16 @@ class StudyMaterialProcessor:
             
             if self.config['output'].get('extract_screenshots', True) and is_video_file:
                 if self.screenshot_extractor: # Check if initialized
+                    self.benchmark_logger.start_phase("screenshot_extraction")
                     print(f"\n📸 Step 3/5: Extracting screenshots...")
                     logger.info("Step 3/5: Extracting screenshots...")
                     screenshots_dir = video_output_dir / screenshots_subdir_name
                     # Pass speech_segments again or ensure it's used from init
                     # The extractor is now initialized with segments, so this call is fine
                     screenshots = self.screenshot_extractor.extract_screenshots(video_path, str(screenshots_dir))
+                    self.benchmark_logger.end_phase("screenshot_extraction", metadata={
+                        "screenshot_count": len(screenshots)
+                    })
                 else:
                     logger.warning("Screenshot extractor not initialized, skipping screenshot extraction.")
             elif not is_video_file:
@@ -193,13 +216,18 @@ class StudyMaterialProcessor:
             # Step 4: Find related PDFs
             related_pdfs = []
             if self.pdf_matcher:
+                self.benchmark_logger.start_phase("pdf_matching")
                 print(f"\n📚 Step 4/5: Finding related PDFs...")
                 logger.info("Step 4/5: Finding related PDFs...")
                 related_pdfs = self.pdf_matcher.find_related_pdfs(video_path)
+                self.benchmark_logger.end_phase("pdf_matching", metadata={
+                    "pdf_count": len(related_pdfs)
+                })
             else:
                 logger.info("Step 4/5: PDF matching disabled (no studies directory)")
             
             # Step 5: Map screenshots to transcript
+            self.benchmark_logger.start_phase("mapping_and_report_generation")
             print(f"\n🔗 Step 5/5: Creating mappings and generating reports...")
             logger.info("Step 5/5: Creating screenshot-transcript mappings...")
             screenshot_transcript_mapping = self._map_screenshots_to_transcript(
@@ -226,6 +254,15 @@ class StudyMaterialProcessor:
             
             # Save results
             self._save_results(result, video_output_dir, video_name)
+            self.benchmark_logger.end_phase("mapping_and_report_generation")
+            
+            # End benchmark logging with success
+            self.benchmark_logger.end_run(success=True, result_data={
+                "word_count": word_count,
+                "segment_count": len(speech_segments),
+                "screenshot_count": len(screenshots),
+                "pdf_count": len(related_pdfs)
+            })
             
             # Cleanup if requested
             if self.config['output']['cleanup_audio'] and os.path.exists(audio_path):
@@ -233,10 +270,17 @@ class StudyMaterialProcessor:
                 logger.info("Cleaned up extracted audio file")
             
             logger.info(f"Processing completed in {processing_time:.2f} seconds")
+            
+            # Print quick benchmark summary
+            print(f"\n📊 Performance: {processing_time:.1f}s total ({video_info['duration_seconds']/processing_time:.2f}x realtime)")
+            
             return result
             
         except Exception as e:
-            logger.error(f"Error processing video {video_path}: {e}")
+            error_msg = f"Error processing video {video_path}: {e}"
+            logger.error(error_msg)
+            self.benchmark_logger.log_error(str(e), "processing")
+            self.benchmark_logger.end_run(success=False)
             raise
     
     def process_batch(self, input_dir: str, output_dir: str, 

@@ -119,8 +119,11 @@ python study_processor_v2.py --input video.mp4 --model medium --no-segmentation
 | Modell | Qualität | Geschwindigkeit | Empfohlen für |
 |--------|----------|-----------------|---------------|
 | `large-v3` | ⭐⭐⭐⭐⭐ | Normal | Beste Ergebnisse |
+| `large-v3-turbo` | ⭐⭐⭐⭐⭐ | Schneller | Neu! Schneller als large-v3 |
 | `medium` | ⭐⭐⭐⭐ | Schneller | Guter Kompromiss |
-| `base` | ⭐⭐⭐ | Am schnellsten | Schnelle Tests |
+| `base` | ⭐⭐⭐ | Schnellste | Tests |
+
+**⚠️ Hinweis:** `large-v3-turbo` ist ein neues Modell (Nov 2024). Nutze Benchmarking um die Performance auf deiner Hardware zu messen!
 
 ---
 
@@ -292,6 +295,11 @@ python study_processor_v2.py --input weitere/ --batch \
 ### Batch-Verarbeitung große Mengen
 
 ```bash
+## 💡 Tipps & Tricks
+
+### Batch-Verarbeitung
+
+```bash
 # Empfohlener Workflow für viele Videos
 python study_processor_v2.py \
   --input ./semester_videos/ \
@@ -299,6 +307,45 @@ python study_processor_v2.py \
   --no-segmentation \
   --cleanup-audio \
   --device cuda
+```
+
+### 📊 Performance Benchmarking
+
+Das Tool sammelt **automatisch Performance-Daten** für alle Runs:
+
+```bash
+# Statistiken anzeigen
+python view_benchmarks.py
+
+# Nach Modell filtern
+python view_benchmarks.py --model large-v3
+
+# Letzte 5 Runs
+python view_benchmarks.py --last 5
+
+# Als JSON exportieren
+python view_benchmarks.py --export stats.json
+```
+
+**Nutzen:**
+- 🎯 Finde das **optimale Modell für deine Hardware**
+- 📈 Vergleiche **echte Performance-Daten** statt Schätzungen
+- 💻 Erstelle **hardware-spezifische Empfehlungen**
+- 📊 Erkenne **Performance-Regressionen** nach Updates
+
+Siehe [BENCHMARKING_GUIDE.md](BENCHMARKING_GUIDE.md) für Details.
+
+### Performance vs. Qualität
+
+**⚠️ Hinweis:** Die folgenden Zeiten sind Richtwerte. Nutze `view_benchmarks.py` für **deine echten Hardware-Daten**.
+
+| Szenario | Kommando | Zeit (1h Video) |
+|----------|----------|-----------------|
+| Maximum Kompatibilität | Standard | ~15-20 min |
+| Balanced | `--model medium` | ~10-15 min |
+| Maximum Speed | `--model medium --no-segmentation` | ~3-5 min |
+| Maximum Qualität | `--model large-v3` | ~15-25 min |
+| Optimal | `--model large-v3 --no-segmentation` | ~5-10 min |
 ```
 
 ---
@@ -329,8 +376,15 @@ python study_processor_v2.py \
 - **Audio:** MP3, WAV, M4A, FLAC, OGG
 
 ### Wie lange dauert die Verarbeitung?
-- **Standard:** ~15-20 min für 1h Video
-- **Performance-Modus:** ~5-10 min für 1h Video
+- **Standard:** ~15-20 min für 1h Video (geschätzt)
+- **Performance-Modus:** ~5-10 min für 1h Video (geschätzt)
+- **📊 Für echte Werte:** `python view_benchmarks.py` nach einigen Runs
+
+### Was ist Benchmarking?
+- **Automatisch:** Jeder Run wird geloggt (Zeit, Hardware, Modell)
+- **Analyse:** `python view_benchmarks.py` zeigt Performance-Stats
+- **Nutzen:** Finde optimale Einstellungen für **deine** Hardware
+- **Details:** Siehe [BENCHMARKING_GUIDE.md](BENCHMARKING_GUIDE.md)
 - **Abhängig von:** Hardware, Modell, Segmentierung
 
 ---

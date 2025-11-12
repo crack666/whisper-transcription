@@ -467,9 +467,8 @@ class HTMLReportGenerator:
         function updateTimeDisplay(time) {
             const timeDisplay = document.getElementById('timeDisplay');
             if (timeDisplay) {
-                const totalMinutes = Math.floor(currentTimelineData.totalDuration / 60);
-                const totalSeconds = Math.floor(currentTimelineData.totalDuration % 60);
-                timeDisplay.textContent = `${formatTimestamp(time)} / ${String(totalMinutes).padStart(2, '0')}:${String(totalSeconds).padStart(2, '0')}:00`;
+                // Use formatTimestamp for both current time and total duration
+                timeDisplay.textContent = `${formatTimestamp(time)} / ${formatTimestamp(currentTimelineData.totalDuration)}`;
             }
         }
         
