@@ -5,6 +5,7 @@ from pydub import AudioSegment
 import matplotlib.pyplot as plt
 from pathlib import Path
 import time
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,8 @@ class WaveformAnalyzer:
         
         logger.debug(f"🔍 Analyzing {num_frames} frames (frame_size: {frame_size_samples}, hop: {hop_size_samples})")
         
-        for i in range(num_frames):
+        # Process frames with progress bar
+        for i in tqdm(range(num_frames), desc="🔬 Analyzing waveform", unit="frames", leave=False):
             start_idx = i * hop_size_samples
             end_idx = start_idx + frame_size_samples
             frame = audio_data[start_idx:end_idx]
