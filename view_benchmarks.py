@@ -125,12 +125,16 @@ Examples:
             for run in recent:
                 status = "✅" if run.get('success') else "❌"
                 model = run.get('config', {}).get('model', 'unknown')
+                processing_mode = run.get('config', {}).get('processing_mode', 'Unknown')
                 duration = run.get('file', {}).get('duration_seconds', 0)
                 processing_time = run.get('total_duration_seconds', 0)
                 speedup = run.get('metrics', {}).get('speedup', 0)
                 timestamp = run.get('timestamp', 'unknown')[:19]  # Remove microseconds
+                gpu_name = run.get('hardware', {}).get('gpu', {}).get('name', 'CPU')
+                if gpu_name != 'CPU':
+                    gpu_name = gpu_name.split()[-1] if gpu_name else 'GPU'  # Shorten GPU name
                 
-                print(f"{status} [{timestamp}] {model:10s} | "
+                print(f"{status} [{timestamp}] {model:15s} {processing_mode:10s} {gpu_name:8s} | "
                       f"{duration:6.1f}s media → {processing_time:6.1f}s process | "
                       f"{speedup:5.2f}x speedup")
 

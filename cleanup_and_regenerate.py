@@ -61,8 +61,8 @@ def cleanup_and_regenerate_directory(target_dir: Path, dir_name: str):
             print(f"   ❌ Failed to load JSON: {e}")
             continue
         
-        # Generate HTML report using new naming convention: Video Name.mp4_report.html
-        html_dest = target_dir / f"{base_name}_report.html"
+        # Generate HTML report using new naming convention: Video Name.mp4.html
+        html_dest = target_dir / f"{base_name}.html"
         try:
             html_generator.generate_report(analysis_data, str(html_dest))
             print(f"   ✅ Generated HTML: {html_dest.name}")
@@ -71,6 +71,32 @@ def cleanup_and_regenerate_directory(target_dir: Path, dir_name: str):
             print(f"   ❌ Failed to generate HTML: {e}")
             import traceback
             traceback.print_exc()
+        
+        # Generate TXT transcript using new naming convention: Video Name.mp4.txt
+        txt_dest = target_dir / f"{base_name}.txt"
+        try:
+            # Handle nested transcription structure
+            transcription_data = analysis_data.get('transcription', {})
+            if isinstance(transcription_data, dict) and 'transcription' in transcription_data:
+                # Nested structure: transcription.transcription.segments
+                segments = transcription_data.get('transcription', {}).get('segments', [])
+            else:
+                # Flat structure: transcription.segments
+                segments = transcription_data.get('segments', [])
+            
+            if segments:
+                text_content = '\n'.join([
+                    seg.get('text', '').strip() 
+                    for seg in segments
+                    if seg.get('text')
+                ])
+                with open(txt_dest, 'w', encoding='utf-8') as f:
+                    f.write(text_content)
+                print(f"   ✅ Generated TXT: {txt_dest.name}")
+            else:
+                print(f"   ⚠️  No transcription segments found for TXT")
+        except Exception as e:
+            print(f"   ❌ Failed to generate TXT: {e}")
         
         print()
     

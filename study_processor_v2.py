@@ -86,8 +86,10 @@ Examples:
                                    help="Whisper model (default: large-v3)")
     transcription_group.add_argument("--device", type=str, default=None,
                                    help="Device for inference (cpu, cuda, etc.)")
+    transcription_group.add_argument("--no-segmentation", action="store_true",
+                                   help="Disable audio segmentation (process entire file). Default: use segmentation for better quality")
     transcription_group.add_argument("--segmentation", action="store_true",
-                                   help="Enable audio segmentation (split file into chunks). Default: process entire file")
+                                   help="Enable audio segmentation (default, kept for compatibility)")
     transcription_group.add_argument("--split-audio", action="store_true",
                                    help="Alias for --segmentation")
     
@@ -161,7 +163,7 @@ def create_config_from_args(args) -> Dict:
             'model': args.model,
             'language': args.language,
             'device': args.device,
-            'disable_segmentation': not (args.segmentation or args.split_audio),  # Default: no segmentation
+            'disable_segmentation': args.no_segmentation,  # Default: segmentation enabled for better quality
         },
         'screenshots': {
             'similarity_threshold': args.similarity_threshold,
@@ -286,7 +288,7 @@ def main():
         if args.batch:
             logger.info(f"Starting batch processing of directory: {args.input}")
             print(f"\n🚀 Starting batch processing...")
-            print(f"   Mode: {'Segmented' if args.segmentation or args.split_audio else 'Whole-File (no segmentation)'}")
+            print(f"   Mode: {'Whole-File (no segmentation)' if args.no_segmentation else 'Segmented (recommended)'}")
             print(f"   Input: {args.input}")
             print(f"   Output: {args.output if args.output else 'Same as input (source directory)'}")
             print(f"   Started at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -310,7 +312,7 @@ def main():
         else:
             logger.info(f"Processing single video: {args.input}")
             print(f"\n🚀 Starting video processing...")
-            print(f"   Mode: {'Segmented' if args.segmentation or args.split_audio else 'Whole-File (no segmentation)'}")
+            print(f"   Mode: {'Whole-File (no segmentation)' if args.no_segmentation else 'Segmented (recommended)'}")
             print(f"   Input: {args.input}")
             print(f"   Output: {args.output if args.output else 'Same as input (source directory)'}")
             print(f"   Started at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")

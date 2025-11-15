@@ -75,8 +75,10 @@ class BenchmarkLogger:
                 "language": config.get('transcription', {}).get('language', 'unknown'),
                 "device": config.get('transcription', {}).get('device', 'unknown'),
                 "segmentation_enabled": not config.get('transcription', {}).get('disable_segmentation', False),
-                "segmentation_mode": config.get('transcription', {}).get('segmentation_mode', 'none'),
-                "screenshots_enabled": config.get('video_processing', {}).get('extract_screenshots', True)
+                "processing_mode": "Segmented" if not config.get('transcription', {}).get('disable_segmentation', False) else "Whole-File",
+                "segmentation_mode": config.get('transcription', {}).get('segmentation_mode', 'auto'),
+                "screenshots_enabled": config.get('video_processing', {}).get('extract_screenshots', True),
+                "compute_type": config.get('transcription', {}).get('compute_type', 'default')
             },
             "hardware": hardware_info,
             "phases": {},
@@ -411,5 +413,15 @@ class BenchmarkLogger:
                 print(f"      Avg Processing Time: {model_stats['avg_processing_time']}s")
                 if "avg_speedup" in model_stats:
                     print(f"      Avg Speedup: {model_stats['avg_speedup']}x")
+        
+        # Hardware summary
+        runs = stats.get("recent_runs", [])
+        if runs:
+            gpu_runs = [r for r in runs if r.get("hardware", {}).get("gpu", {}).get("available")]
+            if gpu_runs:
+                gpu_name = gpu_runs[0].get("hardware", {}).get("gpu", {}).get("name", "Unknown")
+                print(f"\n💻 Hardware Info:")
+                print(f"   GPU: {gpu_name}")
+                print(f"   GPU Runs: {len(gpu_runs)}/{len(runs)}")
                     
         print("\n" + "="*80 + "\n")

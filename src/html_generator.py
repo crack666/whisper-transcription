@@ -210,27 +210,34 @@ class HTMLReportGenerator:
         
         # Extract key metrics
         total_duration = benchmark_data.get("total_duration_seconds", 0)
-        media_duration = benchmark_data.get("media_info", {}).get("duration_seconds", 0)
         
         # Hardware info
-        hw_info = benchmark_data.get("hardware_info", {})
-        cpu_name = hw_info.get("cpu", "N/A")
-        gpu_name = hw_info.get("gpu", "N/A")
+        hw_info = benchmark_data.get("hardware", {})
+        cpu_name = hw_info.get("processor", "N/A")
+        cpu_cores = hw_info.get("cpu_count", "N/A")
+        ram_gb = hw_info.get("ram_gb", "N/A")
+        
+        # GPU info
+        gpu_info = hw_info.get("gpu", {})
+        if gpu_info.get("available"):
+            gpu_name = gpu_info.get("name", "Unknown GPU")
+            gpu_count = gpu_info.get("count", 1)
+            cuda_version = gpu_info.get("cuda_version", "N/A")
+            gpu_display = f"{gpu_name} (CUDA {cuda_version})"
+        else:
+            gpu_display = "CPU only"
         
         # Config info
         config = benchmark_data.get("config", {})
-        model_name = config.get("model", {}).get("name", "N/A")
-        device = config.get("model", {}).get("device", "N/A")
+        model_name = config.get("model", "N/A")
+        device = config.get("device", "N/A")
+        processing_mode = config.get("processing_mode", "Unknown")
+        segmentation_mode = config.get("segmentation_mode", "N/A")
         
         # Metrics
         metrics = benchmark_data.get("metrics", {})
-        rtf = metrics.get("real_time_factor", 0)
         speedup = metrics.get("speedup", 0)
-        
-        # Results
-        results = benchmark_data.get("results", {})
-        word_count = results.get("word_count", 0)
-        screenshot_count = results.get("screenshot_count", 0)
+        rtf = metrics.get("rtf", 0)
         
         # Format processing time
         processing_time_str = f"{total_duration:.1f}s"
@@ -239,21 +246,30 @@ class HTMLReportGenerator:
             seconds = total_duration % 60
             processing_time_str = f"{minutes}m {seconds:.0f}s"
         
+        # Processing mode badge color
+        mode_color = "rgba(76, 175, 80, 0.2)" if processing_mode == "Segmented" else "rgba(33, 150, 243, 0.2)"
+        
         return f'''
             <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.3);">
-                <div style="font-size: 0.95em; margin-bottom: 8px;"><strong>⚡ Performance</strong></div>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; font-size: 0.85em;">
-                    <div style="background-color: rgba(255,255,255,0.1); padding: 6px 10px; border-radius: 4px;">
-                        <strong>Processing Time:</strong> {processing_time_str} ({speedup:.2f}x realtime)
+                <div style="font-size: 0.95em; margin-bottom: 8px;"><strong>⚡ Processing Information</strong></div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; font-size: 0.85em;">
+                    <div style="background-color: rgba(255,255,255,0.1); padding: 8px 12px; border-radius: 4px;">
+                        <strong>⏱️ Processing Time:</strong> {processing_time_str}
                     </div>
-                    <div style="background-color: rgba(255,255,255,0.1); padding: 6px 10px; border-radius: 4px;">
-                        <strong>Model:</strong> {model_name} ({device.upper()})
+                    <div style="background-color: rgba(255,255,255,0.1); padding: 8px 12px; border-radius: 4px;">
+                        <strong>⚡ Speedup:</strong> {speedup:.2f}x realtime (RTF: {rtf:.3f})
                     </div>
-                    <div style="background-color: rgba(255,255,255,0.1); padding: 6px 10px; border-radius: 4px;">
-                        <strong>CPU:</strong> {cpu_name}
+                    <div style="background-color: {mode_color}; padding: 8px 12px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2);">
+                        <strong>🎯 Mode:</strong> {processing_mode}
                     </div>
-                    <div style="background-color: rgba(255,255,255,0.1); padding: 6px 10px; border-radius: 4px;">
-                        <strong>GPU:</strong> {gpu_name}
+                    <div style="background-color: rgba(255,255,255,0.1); padding: 8px 12px; border-radius: 4px;">
+                        <strong>🤖 Model:</strong> {model_name}
+                    </div>
+                    <div style="background-color: rgba(255,255,255,0.1); padding: 8px 12px; border-radius: 4px;">
+                        <strong>🎮 GPU:</strong> {gpu_display}
+                    </div>
+                    <div style="background-color: rgba(255,255,255,0.1); padding: 8px 12px; border-radius: 4px;">
+                        <strong>💻 CPU:</strong> {cpu_cores} cores, {ram_gb}GB RAM
                     </div>
                 </div>
             </div>
