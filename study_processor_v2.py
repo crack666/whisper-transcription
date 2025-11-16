@@ -92,6 +92,14 @@ Examples:
                                    help="Enable audio segmentation (default, kept for compatibility)")
     transcription_group.add_argument("--split-audio", action="store_true",
                                    help="Alias for --segmentation")
+    transcription_group.add_argument("--parallel-workers", type=int, default=1,
+                                   help="Number of parallel workers for segment transcription (default: 1=sequential). "
+                                        "🧪 EXPERIMENTAL: Use 3-4 for faster processing with segmentation. "
+                                        "Requires more VRAM (approx. workers × 4GB for large-v3)")
+    transcription_group.add_argument("--batch-size", type=int, default=3,
+                                   help="Batch size for TRUE batching (default: 3). "
+                                        "Higher values (6-8) may be faster but require more VRAM. "
+                                        "Set to 1 to disable batching (pure sequential).")
     
     # Screenshot settings
     screenshot_group = parser.add_argument_group("Screenshot Settings")
@@ -164,6 +172,8 @@ def create_config_from_args(args) -> Dict:
             'language': args.language,
             'device': args.device,
             'disable_segmentation': args.no_segmentation,  # Default: segmentation enabled for better quality
+            'parallel_workers': args.parallel_workers,  # Number of parallel transcription workers (default: 1)
+            'batch_size': args.batch_size,  # Batch size for TRUE batching (default: 3)
         },
         'screenshots': {
             'similarity_threshold': args.similarity_threshold,

@@ -29,6 +29,8 @@ from pydub import AudioSegment
 from typing import List, Tuple, Dict, Optional, Any
 from pathlib import Path
 from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing as mp
 
 from .waveform_analyzer import WaveformAnalyzer # Assuming precision_waveform_detection uses this
 from .segmentation_handler import SegmentationHandler # New import
@@ -37,6 +39,93 @@ logger = logging.getLogger(__name__)
 
 # Placeholder for LANGUAGE_MAP if not imported from elsewhere
 LANGUAGE_MAP = {"german": "de", "english": "en"}
+
+
+def _transcribe_segment_isolated_worker(work_item: Tuple[int, Tuple, str, str, str, Dict]) -> Dict[str, Any]:
+    """
+    Isolated worker function for parallel segment transcription.
+    Each worker loads its own model to avoid CUDA/GPU conflicts.
+    
+    Args:
+        work_item: Tuple of (index, segment_info, model_name, language, device, config)
+            - index: Original position in segment list (for sorting)
+            - segment_info: (segment_file, original_start, original_end, padded_start, padded_end)
+            - model_name: Whisper model to load
+            - language: Language code
+            - device: Device for inference
+            - config: Transcription config dict
+    
+    Returns:
+        Dictionary with transcription result and metadata:
+        {
+            'index': int,           # Original position
+            'start': float,         # Start time in seconds
+            'end': float,           # End time in seconds  
+            'text': str,            # Transcribed text
+            'segment_file': str,    # Path to segment file
+            'confidence': float,    # Optional confidence score
+            'quality_score': float, # Optional quality score
+            'warnings': list,       # Optional warnings
+            'error': str           # Optional error message
+        }
+    """
+    idx, segment_info, model_name, language, device, config = work_item
+    segment_file, original_start, original_end, padded_start, padded_end = segment_info
+    
+    try:
+        # Each worker loads its own model instance
+        import whisper
+        import torch
+        
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        # Load model in this process
+        model = whisper.load_model(model_name, device=device)
+        
+        # Transcription options
+        transcribe_options = {
+            "language": language,
+            "verbose": False,
+            "fp16": True if device == "cuda" else False,
+            "condition_on_previous_text": True,
+            "initial_prompt": "Dies ist eine Aufzeichnung einer deutschen Universitätsvorlesung.",
+        }
+        
+        # Add enhanced options if configured
+        if config.get('use_beam_search', False):
+            transcribe_options.update({
+                "beam_size": 5,
+                "best_of": config.get('best_of', 3),
+                "patience": config.get('patience', 2.0),
+                "length_penalty": config.get('length_penalty', 0.8),
+            })
+        
+        # Transcribe segment
+        result = model.transcribe(segment_file, **transcribe_options)
+        
+        # Return with metadata
+        return {
+            'index': idx,
+            'start': original_start / 1000.0,  # Convert to seconds
+            'end': original_end / 1000.0,
+            'text': result.get('text', '').strip(),
+            'segment_file': segment_file,
+            'confidence': None,  # Could be calculated from result if needed
+            'quality_score': None,
+            'warnings': None
+        }
+        
+    except Exception as e:
+        logger.error(f"Worker failed on segment {idx} ({segment_file}): {e}")
+        return {
+            'index': idx,
+            'start': original_start / 1000.0,
+            'end': original_end / 1000.0,
+            'text': f"[Error transcribing segment: {e}]",
+            'segment_file': segment_file,
+            'error': str(e)
+        }
 
 
 class EnhancedAudioTranscriber:
@@ -110,7 +199,13 @@ class EnhancedAudioTranscriber:
             'validate_transcription': True,
             'cleanup_segments': True,
             'create_waveform_visualization': False, # For precision_waveform_detection
-            'segment_prefix': 'segment' # Added for consistency
+            'segment_prefix': 'segment', # Added for consistency
+            
+            # Parallel processing (experimental - DEPRECATED, use batch_size instead)
+            'parallel_workers': 1,  # Number of parallel workers (1=sequential, >1=parallel)
+            
+            # TRUE Batch Processing (NEW! - Encoder batching with single model)
+            'batch_size': 3,  # Number of segments to encode in parallel (3-4 optimal for 32GB VRAM)
         }
     
     def load_model(self) -> None:
@@ -147,7 +242,7 @@ class EnhancedAudioTranscriber:
         total_chunks = 0
         
         # Process chunks with progress bar
-        for i in tqdm(range(0, len(audio), chunk_size), desc="📊 Analyzing audio patterns", unit="chunks", leave=False):
+        for i in tqdm(range(0, len(audio), chunk_size), desc="📊 Analyzing audio patterns", unit="chunks", leave=True):
             chunk = audio[i:i+chunk_size]
             if len(chunk) > 1000:  # At least 1 second
                 chunk_db = chunk.dBFS
@@ -331,6 +426,290 @@ class EnhancedAudioTranscriber:
             "duration_seconds": duration_seconds,
             "words_per_minute": len(words) / (duration_seconds / 60) if duration_seconds > 0 else 0
         }
+    
+    def _verify_timeline_integrity(self, segments: List[Dict]) -> bool:
+        """
+        Verify that segments are in chronological order with valid timestamps.
+        
+        Args:
+            segments: List of transcribed segments with 'start' and 'end' keys
+            
+        Returns:
+            True if timeline is valid, False otherwise
+        """
+        if not segments:
+            return True
+        
+        for i in range(len(segments) - 1):
+            current_end = segments[i].get('end', 0)
+            next_start = segments[i+1].get('start', 0)
+            
+            # Check for timeline violations (overlaps or reversed order)
+            if current_end > next_start + 0.1:  # Allow 0.1s tolerance for floating point
+                logger.error(
+                    f"❌ Timeline violation detected: "
+                    f"Segment {i} ends at {current_end:.2f}s, "
+                    f"but segment {i+1} starts at {next_start:.2f}s"
+                )
+                return False
+            
+            # Check for negative durations
+            if segments[i].get('end', 0) <= segments[i].get('start', 0):
+                logger.error(f"❌ Invalid segment {i}: end <= start")
+                return False
+        
+        logger.info(f"✅ Timeline integrity verified: {len(segments)} segments in correct chronological order")
+        return True
+    
+    def _batch_encode_segments(self, segment_files: List[str]) -> torch.Tensor:
+        """
+        🚀 TRUE BATCH ENCODING: Encode multiple segments in parallel using ONE model!
+        
+        This is the key optimization: Instead of loading model N times (multi-process),
+        we encode all segments together in a single forward pass.
+        
+        Args:
+            segment_files: List of audio file paths to encode
+            
+        Returns:
+            Batch of encoded audio features (batch_size, 1500, 384)
+        """
+        logger.debug(f"🎯 Batch encoding {len(segment_files)} segments...")
+        
+        # Get correct n_mels for this model (80 for older models, 128 for v3/turbo)
+        n_mels = self.model.dims.n_mels
+        
+        # Load and convert all audios to mel spectrograms
+        mel_list = []
+        for segment_file in segment_files:
+            audio = whisper.load_audio(segment_file)
+            mel = whisper.log_mel_spectrogram(torch.from_numpy(audio), n_mels=n_mels)
+            mel_list.append(mel)
+        
+        # Pad to same length (required for batching)
+        max_len = max(mel.shape[-1] for mel in mel_list)
+        padded_mels = []
+        for mel in mel_list:
+            if mel.shape[-1] < max_len:
+                padding = torch.zeros(mel.shape[0], max_len - mel.shape[-1])
+                mel = torch.cat([mel, padding], dim=1)
+            padded_mels.append(mel)
+        
+        # Stack to batch (batch_size, 80, frames)
+        mel_batch = torch.stack(padded_mels).to(self.model.device)
+        
+        # Encode ALL in ONE forward pass! 🚀
+        with torch.no_grad():
+            audio_features_batch = self.model.encoder(mel_batch)
+        
+        logger.debug(f"   ✅ Batch encoded: {audio_features_batch.shape}")
+        return audio_features_batch
+    
+    def _batch_decode_features(self, audio_features_batch: torch.Tensor, segment_infos: List[Tuple]) -> List[Dict]:
+        """
+        Decode batch of audio features sequentially (autoregressive limitation).
+        
+        Args:
+            audio_features_batch: Encoded features (batch_size, 1500, 384)
+            segment_infos: List of (segment_file, original_start, original_end, ...)
+            
+        Returns:
+            List of transcribed segments
+        """
+        results = []
+        
+        decode_options = whisper.DecodingOptions(
+            language=self.language,
+            fp16=torch.cuda.is_available(),
+            without_timestamps=False
+        )
+        
+        # Decode each (autoregressive - must be sequential)
+        for i, (audio_features, segment_info) in enumerate(zip(audio_features_batch, segment_infos)):
+            segment_file, original_start, original_end = segment_info[:3]
+            
+            try:
+                result = whisper.decode(self.model, audio_features.unsqueeze(0), decode_options)
+                text = result[0].text.strip()
+                
+                results.append({
+                    'start': original_start / 1000.0,
+                    'end': original_end / 1000.0,
+                    'text': text,
+                    'segment_file': segment_file,
+                    'confidence': None,
+                    'quality_score': None,
+                    'warnings': None
+                })
+                
+            except Exception as e:
+                logger.error(f"Decode failed for segment {i}: {e}")
+                results.append({
+                    'start': original_start / 1000.0,
+                    'end': original_end / 1000.0,
+                    'text': f"[Decoding error: {e}]",
+                    'segment_file': segment_file,
+                    'error': str(e)
+                })
+        
+        return results
+    
+    def _transcribe_segments_parallel(self, processed_segments: List[Tuple], max_workers: int = 4) -> List[Dict]:
+        """
+        Transcribe segments in parallel using multiple workers.
+        Each worker loads its own model to avoid GPU conflicts.
+        Results are sorted by original index to maintain timeline order.
+        
+        Args:
+            processed_segments: List of (segment_file, original_start, original_end, padded_start, padded_end)
+            max_workers: Number of parallel workers
+            
+        Returns:
+            List of transcribed segments in original chronological order
+        """
+        logger.info(f"🚀 Starting parallel transcription with {max_workers} workers for {len(processed_segments)} segments")
+        logger.info(f"   Using 'spawn' method for CUDA compatibility")
+        
+        # Prepare work items with index for each segment
+        work_items = [
+            (idx, seg_info, self.model_name, self.language, self.device, self.config)
+            for idx, seg_info in enumerate(processed_segments)
+        ]
+        
+        results = []
+        
+        try:
+            # Use 'spawn' method for CUDA compatibility (required for PyTorch multiprocessing)
+            ctx = mp.get_context('spawn')
+            with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as executor:
+                # Submit all tasks
+                future_to_index = {
+                    executor.submit(_transcribe_segment_isolated_worker, work_item): work_item[0]
+                    for work_item in work_items
+                }
+                
+                # Collect results as they complete with progress bar
+                for future in tqdm(
+                    as_completed(future_to_index),
+                    total=len(work_items),
+                    desc="🎤 Transcribing segments (parallel)",
+                    unit="segment"
+                ):
+                    idx = future_to_index[future]
+                    try:
+                        result = future.result()
+                        results.append(result)
+                    except Exception as e:
+                        logger.error(f"Failed to get result for segment {idx}: {e}")
+                        # Create error placeholder
+                        seg_info = processed_segments[idx]
+                        results.append({
+                            'index': idx,
+                            'start': seg_info[1] / 1000.0,
+                            'end': seg_info[2] / 1000.0,
+                            'text': f"[Transcription failed: {e}]",
+                            'segment_file': seg_info[0],
+                            'error': str(e)
+                        })
+        
+        except Exception as e:
+            logger.error(f"Parallel processing executor failed: {e}")
+            raise
+        
+        # CRITICAL: Sort by original index to restore chronological order
+        results.sort(key=lambda x: x['index'])
+        
+        logger.info(f"✅ Parallel transcription complete: {len(results)} segments processed and sorted")
+        
+        # Verify timeline integrity
+        if not self._verify_timeline_integrity(results):
+            logger.warning("⚠️ Timeline integrity check failed - results may be out of order!")
+        
+        # Remove index field from results (no longer needed)
+        output_segments = []
+        for r in results:
+            segment = {k: v for k, v in r.items() if k != 'index'}
+            output_segments.append(segment)
+        
+        return output_segments
+    
+    def _transcribe_segments_sequential(self, processed_segments: List[Tuple]) -> List[Dict]:
+        """
+        🚀 TRUE BATCH TRANSCRIPTION: Process segments with encoder batching!
+        
+        This method now uses batch encoding (parallel) + sequential decoding.
+        Much faster than old sequential, same VRAM as single model!
+        
+        Args:
+            processed_segments: List of (segment_file, original_start, original_end, ...)
+            
+        Returns:
+            List of transcribed segments in chronological order
+        """
+        batch_size = self.config.get('batch_size', 3)  # Default: 3 segments at once
+        total_segments = len(processed_segments)
+        
+        logger.info(f"🚀 TRUE BATCH TRANSCRIPTION: {total_segments} segments with batch_size={batch_size}")
+        logger.info(f"   1 Model ({self.model_name}), GPU encoder batching, ~12GB VRAM")
+        
+        all_transcribed_segments = []
+        
+        # Process in batches
+        num_batches = (total_segments + batch_size - 1) // batch_size
+        
+        with tqdm(total=total_segments, desc="🎤 Batch transcribing", unit="segment") as pbar:
+            for batch_idx in range(num_batches):
+                start_idx = batch_idx * batch_size
+                end_idx = min(start_idx + batch_size, total_segments)
+                batch_segments = processed_segments[start_idx:end_idx]
+                
+                logger.debug(f"📦 Batch {batch_idx+1}/{num_batches}: segments {start_idx}-{end_idx-1}")
+                
+                try:
+                    # Extract segment files for encoding
+                    segment_files = [seg_info[0] for seg_info in batch_segments]
+                    
+                    # 🚀 BATCH ENCODE (parallel GPU execution!)
+                    audio_features_batch = self._batch_encode_segments(segment_files)
+                    
+                    # 🐌 SEQUENTIAL DECODE (autoregressive limitation)
+                    batch_results = self._batch_decode_features(audio_features_batch, batch_segments)
+                    
+                    all_transcribed_segments.extend(batch_results)
+                    pbar.update(len(batch_segments))
+                    
+                except Exception as e:
+                    logger.error(f"Batch {batch_idx+1} failed: {e}")
+                    # Fallback: transcribe individually
+                    for segment_info in batch_segments:
+                        segment_file, original_start, original_end = segment_info[:3]
+                        try:
+                            result = self.transcribe_with_enhanced_options(segment_file)
+                            validated = self.validate_transcription_segment(
+                                result, (segment_file, original_start, original_end)
+                            )
+                            all_transcribed_segments.append({
+                                "start": original_start / 1000.0,
+                                "end": original_end / 1000.0,
+                                "text": validated["text"],
+                                "confidence": validated.get("confidence"),
+                                "quality_score": validated.get("quality_score"),
+                                "warnings": validated.get("warnings"),
+                                "segment_file": segment_file
+                            })
+                        except Exception as fallback_error:
+                            logger.error(f"Fallback failed for {segment_file}: {fallback_error}")
+                            all_transcribed_segments.append({
+                                "start": original_start / 1000.0,
+                                "end": original_end / 1000.0,
+                                "text": f"[Error: {fallback_error}]",
+                                "segment_file": segment_file,
+                                "error": str(fallback_error)
+                            })
+                        pbar.update(1)
+        
+        logger.info(f"✅ Batch transcription complete: {len(all_transcribed_segments)} segments")
+        return all_transcribed_segments
     
     def _transcribe_whole_file(self, audio_file: str, analysis_data: Dict, start_time: float) -> Dict[str, Any]:
         """
@@ -517,6 +896,11 @@ class EnhancedAudioTranscriber:
         # The audio object for segment creation is 'audio' (AudioSegment.from_file(audio_file))
         # The audio file path string for naming is 'audio_file'
         
+        logger.info(f"")
+        logger.info(f"📝 Detected {len(nonsilent_ranges)} speech segments")
+        logger.info(f"📁 Now exporting segment audio files to disk...")
+        logger.info(f"")
+        
         processed_segments: List[Tuple[str, int, int, int, int]] = []
         if segmentation_mode in ['defensive_silence', 'precision_waveform']:
             # These VAD methods produce non-overlapping speech chunks.
@@ -580,58 +964,37 @@ class EnhancedAudioTranscriber:
                 "warnings": ["No segments created for transcription."]
             }
             
-        # Step 4: Transcribe each segment
-        all_transcribed_segments = []
-        full_text = ""
+        # Step 4: Transcribe segments (parallel or sequential)
+        max_workers = self.config.get('parallel_workers', 1)
         
-        for segment_info in processed_segments:
-            segment_file, original_start, original_end, padded_start, padded_end = segment_info
-            
-            logger.info(f"Transcribing segment: {segment_file} (Original: {original_start}-{original_end}ms)")
-            
-            try:
-                transcription_result = self.transcribe_with_enhanced_options(segment_file)
-                
-                # Validate and process result
-                # Pass (segment_file, original_start, original_end) for validation context
-                validated_result = self.validate_transcription_segment(transcription_result, 
-                                                                       (segment_file, original_start, original_end))
-                
-                # Adjust timestamps if word-level timestamps are available
-                # This part needs careful implementation if Whisper result includes word timestamps
-                # For now, assume segment-level timestamps are based on original_start/end
-                
-                # Create segment dictionary for output
-                output_segment = {
-                    "start": original_start / 1000.0, # Convert to seconds
-                    "end": original_end / 1000.0,     # Convert to seconds
-                    "text": validated_result["text"],
-                    "confidence": validated_result.get("confidence"),
-                    "quality_score": validated_result.get("quality_score"),
-                    "warnings": validated_result.get("warnings"),
-                    # Potentially add word timestamps here if available and processed
-                }
-                all_transcribed_segments.append(output_segment)
-                full_text += validated_result["text"] + " "
-                
-            except Exception as e:
-                logger.error(f"Error transcribing segment {segment_file}: {e}")
-                all_transcribed_segments.append({
-                    "start": original_start / 1000.0,
-                    "end": original_end / 1000.0,
-                    "text": f"[Error transcribing segment: {e}]",
-                    "error": str(e)
-                })
-            
-            # Optional: Clean up segment file
-            if self.config.get('cleanup_segments', True):
-                try:
-                    Path(segment_file).unlink(missing_ok=True) # missing_ok for Python 3.8+
-                except FileNotFoundError:
-                    pass # Already deleted or never created
-                except Exception as e:
-                    logger.warning(f"Could not delete segment file {segment_file}: {e}")
-
+        if max_workers > 1:
+            # Use parallel processing
+            logger.info(f"")
+            logger.info(f"🚀 Starting PARALLEL transcription with {max_workers} workers")
+            logger.info(f"   Each worker will load its own model (~{max_workers * 3}GB VRAM)")
+            logger.info(f"   Monitor GPU utilization - should be much higher than sequential mode")
+            logger.info(f"")
+            all_transcribed_segments = self._transcribe_segments_parallel(processed_segments, max_workers)
+        else:
+            # Use sequential processing (default)
+            all_transcribed_segments = self._transcribe_segments_sequential(processed_segments)
+        
+        # Build full text from all segments
+        full_text = " ".join(seg.get('text', '') for seg in all_transcribed_segments)
+        
+        # Step 5: Clean up segment files (after all workers complete!)
+        if self.config.get('cleanup_segments', True):
+            logger.info("🧹 Cleaning up segment files...")
+            for segment in all_transcribed_segments:
+                segment_file = segment.get('segment_file')
+                if segment_file:
+                    try:
+                        Path(segment_file).unlink(missing_ok=True)
+                    except FileNotFoundError:
+                        pass
+                    except Exception as e:
+                        logger.warning(f"Could not delete segment file {segment_file}: {e}")
+        
         # Clean up temp_dir if it was created for fixed_time mode
         if segmentation_mode == 'fixed_time' and 'temp_dir' in locals() and temp_dir.exists():
             try:
