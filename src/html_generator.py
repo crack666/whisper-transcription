@@ -361,7 +361,7 @@ class HTMLReportGenerator:
             start_formatted = format_timestamp_seconds(segment.get("start", 0))
             end_formatted = format_timestamp_seconds(segment.get("end", 0))
             text = (segment.get("text") or "").strip()
-            confidence = segment.get("confidence", 0)
+            confidence = segment.get("confidence", 0) or 0  # Handle None values from parallel processing
             # Simplified confidence class for initial render, JS can be more detailed
             confidence_class = "high-confidence" if confidence > 0.8 else ("medium-confidence" if confidence > 0.6 else "low-confidence")
             if not text: continue

@@ -147,7 +147,7 @@ class WaveformAnalyzer:
         logger.debug(f"🔍 Analyzing {num_frames} frames (frame_size: {frame_size_samples}, hop: {hop_size_samples})")
         
         # Process frames with progress bar
-        for i in tqdm(range(num_frames), desc="🔬 Analyzing waveform", unit="frames", leave=False):
+        for i in tqdm(range(num_frames), desc="🔬 Analyzing waveform", unit="frames", leave=True):
             start_idx = i * hop_size_samples
             end_idx = start_idx + frame_size_samples
             frame = audio_data[start_idx:end_idx]
