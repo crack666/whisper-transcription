@@ -115,7 +115,7 @@ class HTMLReportGenerator:
         """Returns the embedded CSS for the HTML report."""
         return '''
         body { font-family: sans-serif; margin: 0; background-color: #f4f4f4; color: #333; }
-        .container { max-width: 1200px; margin: 20px auto; background-color: #fff; padding: 20px; box-shadow: 0 0 10px rgba(0,0,0,0.1); border-radius: 8px; }
+        .container { max-width: 95%; margin: 20px auto; background-color: #fff; padding: 20px; box-shadow: 0 0 10px rgba(0,0,0,0.1); border-radius: 8px; }
         .header { background-color: #007bff; color: white; padding: 20px; border-radius: 8px 8px 0 0; margin: -20px -20px 20px -20px; }
         .header h1 { margin: 0; font-size: 1.8em; }
         .header-info { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 10px; font-size: 0.9em; }

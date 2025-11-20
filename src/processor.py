@@ -256,8 +256,6 @@ class StudyMaterialProcessor:
                 "time_estimates": time_estimate
             }
             
-            # Save results
-            self._save_results(result, video_output_dir, video_name)
             self.benchmark_logger.end_phase("mapping_and_report_generation")
             
             # End benchmark logging with success
@@ -268,8 +266,11 @@ class StudyMaterialProcessor:
                 "pdf_count": len(related_pdfs)
             })
             
-            # Add benchmark data to result for HTML display
+            # Add benchmark data to result for HTML display (BEFORE saving!)
             result["benchmark"] = self.benchmark_logger.current_run
+            
+            # Save results (now includes benchmark data)
+            self._save_results(result, video_output_dir, video_name)
             
             # Cleanup if requested
             if self.config['output']['cleanup_audio'] and os.path.exists(audio_path):
