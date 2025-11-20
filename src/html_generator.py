@@ -149,6 +149,26 @@ class HTMLReportGenerator:
         th { background-color: #007bff; color: white; }
         tr:nth-child(even) { background-color: #f2f2f2; }
         
+        /* Transcript Tab Overflow Fix */
+        .transcript-tab-container { 
+            display: flex; 
+            flex-direction: column; 
+            height: calc(100vh - 550px); 
+            min-height: 500px; 
+            max-height: 1200px; 
+        }
+        .transcript-header { flex-shrink: 0; margin-bottom: 10px; }
+        .transcript-stats { flex-shrink: 0; margin-bottom: 15px; }
+        .transcript-container { 
+            flex: 1; 
+            overflow-y: auto; 
+            border: 1px solid #ddd; 
+            border-radius: 4px; 
+            padding: 10px; 
+            background: white;
+            min-height: 0;
+        }
+        
         /* Timeline-based UI Styles */
         .timeline-container { background: #f8f9fa; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
         .timeline-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
@@ -158,7 +178,7 @@ class HTMLReportGenerator:
         .timeline-button:disabled { background: #6c757d; cursor: not-allowed; }
         .timeline-info { font-size: 14px; color: #666; }
         
-        .timeline-main { display: flex; gap: 20px; height: calc(100vh - 400px); min-height: 500px; max-height: 1200px; }
+        .timeline-main { display: flex; gap: 20px; height: calc(100vh - 550px); min-height: 500px; max-height: 1200px; }
         .timeline-sidebar { width: 300px; display: flex; flex-direction: column; min-height: 0; }
         .timeline-content { flex: 1; display: flex; flex-direction: column; min-height: 0; }
         
@@ -323,9 +343,8 @@ class HTMLReportGenerator:
         <div class="tabs">
             <div class="tab active" onclick="showTab('active_transcript', 'active_file_container')" data-tab="active_transcript">📝 Transkript</div>
             <div class="tab" onclick="showTab('active_statistics', 'active_file_container')" data-tab="active_statistics">📊 Statistiken & Parameter</div>
-            <div class="tab" onclick="showTab('active_screenshots', 'active_file_container')" data-tab="active_screenshots">🖼️ Screenshots</div>
             <div class="tab" onclick="showTab('active_pdfs', 'active_file_container')" data-tab="active_pdfs">📄 PDFs</div>
-            <div class="tab" onclick="showTab('active_mapping', 'active_file_container')" data-tab="active_mapping">🔗 Mapping</div>
+            <div class="tab" onclick="showTab('active_mapping', 'active_file_container')" data-tab="active_mapping">🔗 Timeline</div>
         </div>
 
         <div id="active_transcript" class="tab-content active">
@@ -333,9 +352,6 @@ class HTMLReportGenerator:
         </div>
         <div id="active_statistics" class="tab-content">
             {self._initial_statistics_html(first_result_data)}
-        </div>
-        <div id="active_screenshots" class="tab-content">
-            {self._initial_screenshots_html(first_result_data.get("screenshots", []))}
         </div>
         <div id="active_pdfs" class="tab-content">
             {self._initial_pdfs_html(first_result_data.get("related_pdfs", []))}
@@ -377,9 +393,11 @@ class HTMLReportGenerator:
         full_text = actual_transcription_data.get("text", "")
         word_count = len(full_text.split()) if full_text else 0
         return f'''
-            <div class="section">
-                <h2>📝 Transkript</h2>
-                <div class="section-stats">
+            <div class="section transcript-tab-container">
+                <div class="transcript-header">
+                    <h2>📝 Transkript</h2>
+                </div>
+                <div class="transcript-stats section-stats">
                     <span>Segmente: {len(actual_transcription_data.get("segments", []))}</span>
                     <span>Wörter: {word_count}</span>
                     <span>Zeichen: {len(full_text)}</span>
@@ -391,15 +409,12 @@ class HTMLReportGenerator:
     def _initial_statistics_html(self, file_data: dict) -> str:
         # Placeholder for initial statistics. JS will generate the full content.
         return '<div class="section"><h2>📊 Statistiken & Parameter</h2><div class="empty-state"><p>Statistiken werden geladen...</p></div></div>'
-
-    def _initial_screenshots_html(self, screenshots: list) -> str:
-        return '<div class="section"><h2>🖼️ Screenshots</h2><div class="empty-state"><p>Screenshots werden geladen...</p></div></div>'
         
     def _initial_pdfs_html(self, pdfs: list) -> str:
         return '<div class="section"><h2>📄 PDFs</h2><div class="empty-state"><p>PDFs werden geladen...</p></div></div>'
 
     def _initial_mapping_html(self, mapping_data: list) -> str:
-        return '<div class="section"><h2>🔗 Mapping</h2><div class="empty-state"><p>Mapping-Daten werden geladen...</p></div></div>'
+        return '<div class="section"><h2>🔗 Timeline</h2><div class="empty-state"><p>Timeline-Daten werden geladen...</p></div></div>'
 
     def _get_embedded_javascript(self, all_analysis_results: List[Dict]) -> str:
         """Generate JavaScript for tab navigation, search, and dynamic content updates."""
@@ -678,7 +693,7 @@ class HTMLReportGenerator:
                 const actualTranscriptionData = transcriptionData && transcriptionData.transcription ? transcriptionData.transcription : transcriptionData;
                 
                 if (!actualTranscriptionData || !actualTranscriptionData.segments || actualTranscriptionData.segments.length === 0) {
-                    tabContent.innerHTML = '<div class="section"><h2>📝 Transkript</h2><div class="empty-state"><p>Kein Transkript verfügbar.</p></div></div>';
+                    tabContent.innerHTML = '<div class="section"><div class="empty-state"><p>Kein Transkript verfügbar.</p></div></div>';
                     return;
                 }
 
@@ -704,9 +719,11 @@ class HTMLReportGenerator:
                 const wordCount = fullText ? fullText.split(/\s+/).filter(Boolean).length : 0;
                 
                 tabContent.innerHTML = `
-                    <div class="section">
-                        <h2>📝 Transkript</h2>
-                        <div class="section-stats">
+                    <div class="section transcript-tab-container">
+                        <div class="transcript-header">
+                            <h2>📝 Transkript</h2>
+                        </div>
+                        <div class="transcript-stats section-stats">
                             <span>Segmente: ${actualTranscriptionData.segments.length}</span>
                             <span>Wörter: ${wordCount}</span>
                             <span>Zeichen: ${fullText.length}</span>
@@ -751,51 +768,6 @@ class HTMLReportGenerator:
                 }
                 html += '</div>';
                 tabContent.innerHTML = html;
-            }
-
-            function updateScreenshotsTab(screenshots) {
-                const tabContent = document.getElementById('active_screenshots');
-                if (!screenshots || screenshots.length === 0) {
-                    tabContent.innerHTML = '<div class="section"><h2>🖼️ Screenshots</h2><div class="empty-state"><p>Keine Screenshots verfügbar.</p></div></div>';
-                    return;
-                }
-                let imagesHtml = screenshots.map(ss => {
-                    // Fix: Use correct property (filepath instead of path) and handle relative paths
-                    let imagePath = ss.filepath || ss.path;
-                    if (imagePath) {
-                        // Convert backslashes to forward slashes
-                        imagePath = imagePath.replace(/\\/g, '/');
-                        
-                        // Extract folder ending with screenshots + filename
-                        // This matches patterns like:
-                        // - results/mad/VideoName/screenshots/file.jpg -> VideoName_screenshots/file.jpg
-                        // - VideoName_screenshots/file.jpg -> VideoName_screenshots/file.jpg
-                        const screenshotsMatch = imagePath.match(/([^\/]+)\/screenshots\/([^\/]+)$/i);
-                        if (screenshotsMatch) {
-                            // Use VideoName_screenshots/filename format
-                            const videoName = screenshotsMatch[1];
-                            const filename = screenshotsMatch[2];
-                            imagePath = videoName + '_screenshots/' + filename;
-                        } else {
-                            // Already in correct format or try to extract last folder + filename
-                            const pathParts = imagePath.split('/');
-                            const filename = pathParts[pathParts.length - 1];
-                            const folderName = pathParts[pathParts.length - 2] || '';
-                            if (folderName) {
-                                imagePath = folderName + '/' + filename;
-                            } else {
-                                imagePath = filename;
-                            }
-                        }
-                    }
-                    return `
-                        <div class="stats-card">
-                            <img src="${imagePath}" alt="Screenshot at ${formatTimestamp(ss.timestamp)}" style="max-width: 100%; height: auto; border-radius: 4px;" onerror="this.style.display='none'; this.nextElementSibling.innerHTML='❌ Image not found: ${imagePath}';">
-                            <p style="text-align: center; margin-top: 5px;">Timestamp: ${formatTimestamp(ss.timestamp)}</p>
-                        </div>
-                    `;
-                }).join('');
-                tabContent.innerHTML = `<div class="section"><h2>🖼️ Screenshots</h2><div style="display: flex; flex-wrap: wrap; gap: 15px;">${imagesHtml}</div></div>`;
             }
 
             function updatePDFsTab(pdfs) {
@@ -945,7 +917,6 @@ class HTMLReportGenerator:
                 updateHeader(selectedFileData);
                 updateTranscriptTab(selectedFileData.transcription);
                 updateStatisticsTab(selectedFileData);
-                updateScreenshotsTab(selectedFileData.screenshots);
                 updatePDFsTab(selectedFileData.related_pdfs);
                 
                 // Extract segments for timeline
@@ -987,11 +958,10 @@ class HTMLReportGenerator:
                 fileSelector.disabled = true;
                 // Clear content areas or show a general error message
                 updateHeader(null); // Clear header
-                document.getElementById('active_transcript').innerHTML = '<div class="section"><h2>📝 Transkript</h2><div class="empty-state"><p>Keine Daten zum Anzeigen.</p></div></div>';
+                document.getElementById('active_transcript').innerHTML = '<div class="section"><div class="empty-state"><p>Keine Daten zum Anzeigen.</p></div></div>';
                 document.getElementById('active_statistics').innerHTML = '<div class="section"><h2>📊 Statistiken & Parameter</h2><div class="empty-state"><p>Keine Daten zum Anzeigen.</p></div></div>';
-                document.getElementById('active_screenshots').innerHTML = '<div class="section"><h2>🖼️ Screenshots</h2><div class="empty-state"><p>Keine Daten zum Anzeigen.</p></div></div>';
                 document.getElementById('active_pdfs').innerHTML = '<div class="section"><h2>📄 PDFs</h2><div class="empty-state"><p>Keine Daten zum Anzeigen.</p></div></div>';
-                document.getElementById('active_mapping').innerHTML = '<div class="section"><h2>🔗 Mapping</h2><div class="empty-state"><p>Keine Daten zum Anzeigen.</p></div></div>';
+                document.getElementById('active_mapping').innerHTML = '<div class="section"><h2>🔗 Timeline</h2><div class="empty-state"><p>Keine Daten zum Anzeigen.</p></div></div>';
             }
         });
         '''
