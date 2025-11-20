@@ -6,6 +6,7 @@ screenshot extraction, and PDF linking using a clean modular architecture.
 """
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -16,9 +17,9 @@ from typing import Dict, Optional
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from src.processor import StudyMaterialProcessor
+# Import only what's needed for basic functionality
 from src.config import WHISPER_MODELS, LANGUAGE_MAP, LOGGING_CONFIG
-from src.utils import check_dependencies
+from src.html_generator import HTMLReportGenerator
 
 def setup_logging(verbose: bool = False, debug: bool = False) -> None:
     """
@@ -59,6 +60,10 @@ Examples:
 
   # High quality processing
   python study_processor_v2.py --input video.mp4 --model large-v3 --similarity-threshold 0.80
+  
+  # Regenerate HTML/TXT reports from existing JSON files (fast!)
+  python study_processor_v2.py --input mad --regenerate-reports
+  python study_processor_v2.py --input "mad/Video.mp4.json" --regenerate-reports
         """
     )
     
@@ -75,6 +80,8 @@ Examples:
                        help="Process all videos in input directory")
     parser.add_argument("--analyze-only", action="store_true",
                        help="Only analyze video complexity without processing")
+    parser.add_argument("--regenerate-reports", action="store_true",
+                       help="Regenerate HTML/TXT reports from existing JSON files (no transcription/screenshots)")
     
     # Transcription settings
     transcription_group = parser.add_argument_group("Transcription Settings")
@@ -186,6 +193,10 @@ def validate_inputs(args) -> None:
     Args:
         args: Parsed command line arguments
     """
+    # Skip validation for regenerate mode (handled separately)
+    if args.regenerate_reports:
+        return
+    
     # Check input path
     if not os.path.exists(args.input):
         logging.error(f"Input path does not exist: {args.input}")
@@ -204,6 +215,133 @@ def validate_inputs(args) -> None:
     if args.studies and not os.path.exists(args.studies):
         logging.warning(f"Studies directory does not exist: {args.studies}")
 
+
+def regenerate_reports(input_path: str) -> None:
+    """
+    Regenerate HTML and TXT reports from existing JSON files.
+    
+    Args:
+        input_path: Path to JSON file or directory containing JSON files
+    """
+    logger = logging.getLogger(__name__)
+    html_generator = HTMLReportGenerator()
+    
+    input_path_obj = Path(input_path)
+    json_files = []
+    
+    # Find JSON files
+    if input_path_obj.is_file():
+        if input_path_obj.suffix == '.json':
+            json_files = [input_path_obj]
+        else:
+            logger.error(f"Input file is not a JSON file: {input_path}")
+            sys.exit(1)
+    elif input_path_obj.is_dir():
+        # Find all .mp4.json files in directory
+        json_files = list(input_path_obj.glob("*.mp4.json"))
+        if not json_files:
+            logger.error(f"No JSON files found in directory: {input_path}")
+            sys.exit(1)
+    else:
+        logger.error(f"Input path does not exist: {input_path}")
+        sys.exit(1)
+    
+    print(f"\n🔄 Regenerating reports from {len(json_files)} JSON file(s)...")
+    print(f"   Input: {input_path}")
+    print(f"   Started at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+    
+    success_count = 0
+    
+    for json_file in json_files:
+        base_name = json_file.stem  # e.g., "Video Name.mp4"
+        print(f"📄 Processing: {base_name}")
+        
+        # Load JSON data
+        try:
+            with open(json_file, 'r', encoding='utf-8') as f:
+                analysis_data = json.load(f)
+        except Exception as e:
+            print(f"   ❌ Failed to load JSON: {e}")
+            continue
+        
+        # Generate HTML report
+        html_dest = json_file.parent / f"{base_name}.html"
+        try:
+            html_generator.generate_report(analysis_data, str(html_dest))
+            print(f"   ✅ Generated HTML: {html_dest.name}")
+        except Exception as e:
+            print(f"   ❌ Failed to generate HTML: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+        
+        # Generate TXT transcript
+        txt_dest = json_file.parent / f"{base_name}.txt"
+        try:
+            # Handle nested transcription structure
+            transcription_data = analysis_data.get('transcription', {})
+            if isinstance(transcription_data, dict) and 'transcription' in transcription_data:
+                actual_transcription = transcription_data['transcription']
+            else:
+                actual_transcription = transcription_data
+            
+            # Extract plain text
+            segments = actual_transcription.get('segments', [])
+            if segments:
+                lines = []
+                lines.append("=" * 80)
+                lines.append("TRANSCRIPTION")
+                lines.append("=" * 80)
+                lines.append("")
+                
+                # Add metadata
+                if actual_transcription.get('language'):
+                    lines.append(f"Language: {actual_transcription['language']}")
+                
+                duration = segments[-1].get('end', 0) if segments else 0
+                lines.append(f"Duration: {duration / 60:.1f} minutes ({duration:.1f} seconds)")
+                lines.append(f"Segments: {len(segments)}")
+                
+                word_count = sum(len(seg.get('text', '').split()) for seg in segments)
+                lines.append(f"Words: {word_count}")
+                lines.append("")
+                lines.append("=" * 80)
+                lines.append("")
+                
+                # Add segments with timestamps
+                for segment in segments:
+                    start = segment.get('start', 0)
+                    text = segment.get('text', '').strip()
+                    
+                    if not text:
+                        continue
+                    
+                    # Format timestamp
+                    start_h = int(start // 3600)
+                    start_m = int((start % 3600) // 60)
+                    start_s = int(start % 60)
+                    
+                    timestamp = f"[{start_h:02d}:{start_m:02d}:{start_s:02d}]"
+                    lines.append(f"{timestamp} {text}")
+                    lines.append("")
+                
+                txt_content = "\n".join(lines)
+                
+                with open(txt_dest, 'w', encoding='utf-8') as f:
+                    f.write(txt_content)
+                print(f"   ✅ Generated TXT: {txt_dest.name}")
+        except Exception as e:
+            print(f"   ⚠️  Failed to generate TXT: {e}")
+        
+        success_count += 1
+        print()
+    
+    print(f"✅ Report regeneration completed!")
+    print(f"   Successfully regenerated: {success_count}/{len(json_files)} files")
+    print(f"   Output directory: {os.path.abspath(input_path_obj if input_path_obj.is_dir() else input_path_obj.parent)}")
+    print(f"   Completed at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+
 def main():
     """Main entry point."""
     # Parse arguments
@@ -220,6 +358,15 @@ def main():
     logger = logging.getLogger(__name__)
     
     try:
+        # Handle regenerate-reports mode first (doesn't need full setup)
+        if args.regenerate_reports:
+            regenerate_reports(args.input)
+            return
+        
+        # Import heavy dependencies only when needed for processing
+        from src.processor import StudyMaterialProcessor
+        from src.utils import check_dependencies
+        
         # Validate dependencies first
         logger.info("Checking dependencies...")
         check_dependencies()

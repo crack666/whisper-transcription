@@ -158,9 +158,9 @@ class HTMLReportGenerator:
         .timeline-button:disabled { background: #6c757d; cursor: not-allowed; }
         .timeline-info { font-size: 14px; color: #666; }
         
-        .timeline-main { display: flex; gap: 20px; height: 500px; }
-        .timeline-sidebar { width: 300px; display: flex; flex-direction: column; }
-        .timeline-content { flex: 1; display: flex; flex-direction: column; }
+        .timeline-main { display: flex; gap: 20px; height: calc(100vh - 400px); min-height: 500px; max-height: 1200px; }
+        .timeline-sidebar { width: 300px; display: flex; flex-direction: column; min-height: 0; }
+        .timeline-content { flex: 1; display: flex; flex-direction: column; min-height: 0; }
         
         .timeline-slider-container { margin-bottom: 15px; }
         .timeline-slider { width: 100%; height: 8px; background: #ddd; border-radius: 4px; outline: none; cursor: pointer; }
@@ -176,10 +176,10 @@ class HTMLReportGenerator:
         .segment-time { font-family: monospace; font-size: 12px; color: #666; margin-bottom: 4px; }
         .segment-text { font-size: 14px; line-height: 1.4; }
         
-        .screenshot-viewer { flex: 1; display: flex; flex-direction: column; border: 1px solid #ddd; border-radius: 4px; background: white; }
-        .screenshot-header { padding: 15px; border-bottom: 1px solid #eee; background: #f8f9fa; }
-        .screenshot-content { flex: 1; padding: 15px; display: flex; align-items: center; justify-content: center; background: #fafafa; }
-        .screenshot-image { max-width: 100%; max-height: 100%; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .screenshot-viewer { flex: 1; display: flex; flex-direction: column; border: 1px solid #ddd; border-radius: 4px; background: white; min-height: 0; overflow: hidden; }
+        .screenshot-header { padding: 15px; border-bottom: 1px solid #eee; background: #f8f9fa; flex-shrink: 0; }
+        .screenshot-content { flex: 1; padding: 15px; display: flex; align-items: center; justify-content: center; background: #fafafa; overflow: hidden; min-height: 0; }
+        .screenshot-image { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
         .screenshot-placeholder { color: #999; font-style: italic; text-align: center; }
         
         .timeline-stats { display: flex; gap: 20px; margin-top: 15px; font-size: 14px; color: #666; }

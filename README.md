@@ -67,6 +67,10 @@ python study_processor_v2.py --input video.mp4 --model large-v3-turbo
 
 # 📚 Batch-Verarbeitung mit Qualitäts-Modus
 python study_processor_v2.py --input ./vorlesungen/ --batch --output ./results
+
+# 🔄 Reports neu generieren (schnell - keine Transkription!)
+python study_processor_v2.py --input ./mad --regenerate-reports
+# → Perfekt nach CSS/Template-Updates oder wenn nur HTML/TXT aktualisiert werden soll
 ```
 
 ### Was Sie bekommen
@@ -177,12 +181,15 @@ python study_processor_v2.py --input video.mp4 --language english
 
 # �️ GPU-Beschleunigung nutzen
 python study_processor_v2.py --input video.mp4 --device cuda
-
 # 🧹 Temporäre Dateien aufräumen
 python study_processor_v2.py --input video.mp4 --cleanup-audio
 
 # 🎨 Screenshot-Sensitivität anpassen
 python study_processor_v2.py --input video.mp4 --similarity-threshold 0.90
+
+# 🔄 HTML/TXT Reports neu generieren (z.B. nach CSS-Updates)
+python study_processor_v2.py --input ./mad --regenerate-reports
+python study_processor_v2.py --input "video.mp4.json" --regenerate-reports
 ```
 
 ### Utility-Tools (optional)
@@ -191,16 +198,43 @@ python study_processor_v2.py --input video.mp4 --similarity-threshold 0.90
 # 🔄 Screenshots nachträglich regenerieren
 python regenerate_screenshots.py "video_analysis.json"
 
-# 📄 HTML-Report neu erstellen
-python regenerate_report.py
-
 # 📝 Text separat extrahieren (bereits automatisch, aber für Legacy-Workflows)
 python extract_transcript_text.py --input video_analysis.json --timestamps
 ```
 
 ---
 
-## 📊 Output-Beispiele
+## � Reports neu generieren (ohne Transkription)
+
+**Problem:** Sie haben CSS/Template-Änderungen gemacht oder möchten nur die HTML/TXT-Reports aktualisieren?
+
+**Lösung:** Nutzen Sie `--regenerate-reports` - extrem schnell, da keine Transkription/Screenshots neu erstellt werden!
+
+```bash
+# Ganzes Verzeichnis neu generieren (alle .mp4.json Dateien)
+python study_processor_v2.py --input ./mad --regenerate-reports
+
+# Einzelne Datei neu generieren
+python study_processor_v2.py --input "mad/Video.mp4.json" --regenerate-reports
+```
+
+**Was passiert:**
+- ✅ Liest bestehende JSON-Daten
+- ✅ Generiert neue HTML-Reports mit aktuellem Template/CSS
+- ✅ Generiert neue TXT-Transkripte
+- ❌ **Keine** Transkription (spart Zeit!)
+- ❌ **Keine** Screenshot-Extraktion
+- ⚡ **Ultra-schnell** - 4 Reports in <1 Sekunde!
+
+**Perfekt für:**
+- 🎨 CSS/Design-Updates testen
+- 📝 Template-Änderungen übernehmen
+- 🔧 Bug-Fixes in HTML-Generator anwenden
+- 📊 Benchmark-Header hinzufügen (wie gerade gemacht!)
+
+---
+
+## �📊 Output-Beispiele
 
 ### 📝 Text-Transkript (`video_transcript.txt`)
 ```
