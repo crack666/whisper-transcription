@@ -28,6 +28,7 @@ import numpy as np
 from pydub import AudioSegment
 from typing import List, Tuple, Dict, Optional, Any
 from pathlib import Path
+from tqdm import tqdm
 
 from .waveform_analyzer import WaveformAnalyzer # Assuming precision_waveform_detection uses this
 from .segmentation_handler import SegmentationHandler # New import
@@ -145,7 +146,8 @@ class EnhancedAudioTranscriber:
         speech_chunks = 0
         total_chunks = 0
         
-        for i in range(0, len(audio), chunk_size):
+        # Process chunks with progress bar
+        for i in tqdm(range(0, len(audio), chunk_size), desc="📊 Analyzing audio patterns", unit="chunks", leave=False):
             chunk = audio[i:i+chunk_size]
             if len(chunk) > 1000:  # At least 1 second
                 chunk_db = chunk.dBFS

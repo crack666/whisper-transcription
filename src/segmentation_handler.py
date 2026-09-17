@@ -1,8 +1,8 @@
-\
 from typing import List, Tuple, Dict, Any
 from pydub import AudioSegment
 from pathlib import Path
 import logging
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,10 @@ class SegmentationHandler:
 
         MAX_SEGMENTS_ALLOWED = 500
         
-        for i, (start, end) in enumerate(nonsilent_ranges):
+        logger.info(f"✂️ Creating {len(nonsilent_ranges)} audio segment files...")
+        
+        # Process speech ranges with progress bar
+        for i, (start, end) in enumerate(tqdm(nonsilent_ranges, desc="✂️ Exporting segments to disk", unit="segment", leave=True)):
             if len(segments) >= MAX_SEGMENTS_ALLOWED:
                 logger.error(f"EMERGENCY BREAK: Maximum segment limit ({MAX_SEGMENTS_ALLOWED}) reached! Stopping segment generation.")
                 break
@@ -210,7 +213,10 @@ class SegmentationHandler:
         segments = []
         # base_name = Path(audio_file_path_str).stem # Not used with current f-string naming
 
-        for i, (start, end) in enumerate(nonsilent_ranges):
+        logger.info(f"✂️ Creating {len(nonsilent_ranges)} audio segment files (overlap mode)...")
+        
+        # Process speech ranges with progress bar (overlapping mode)
+        for i, (start, end) in enumerate(tqdm(nonsilent_ranges, desc="✂️ Exporting segments (overlap)", unit="segment", leave=True)):
             segment_length = end - start
             
             if segment_length < min_length:

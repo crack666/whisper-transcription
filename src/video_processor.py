@@ -272,13 +272,15 @@ class VideoScreenshotExtractor:
         Returns:
             Screenshot information dictionary
         """
-        # Generate filename with timestamp
+        # Generate simplified filename (no video name, screenshots are in dedicated folder anyway)
         timestamp_str = format_timestamp_seconds(timestamp).replace(':', '-')
-        # Adapt filename if index is a string (e.g., "segment_start_0" or "change_12")
+        # Use simple naming: screenshot_{index}_{timestamp}.jpg
         if isinstance(index, str):
-             filename = f"{video_name}_screenshot_{index}_{timestamp_str}.jpg"
-        else: # Original behavior if index is an int
-            filename = f"{video_name}_screenshot_{index:03d}_{timestamp_str}.jpg"
+            # For string indices like "segment_start_0" or "change_815"
+            filename = f"screenshot_{index}_{timestamp_str}.jpg"
+        else:
+            # For numeric indices
+            filename = f"screenshot_{index:05d}_{timestamp_str}.jpg"
         filepath = output_dir / filename
         
         # Save image with good quality

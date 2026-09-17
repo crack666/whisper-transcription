@@ -115,7 +115,7 @@ class HTMLReportGenerator:
         """Returns the embedded CSS for the HTML report."""
         return '''
         body { font-family: sans-serif; margin: 0; background-color: #f4f4f4; color: #333; }
-        .container { max-width: 1200px; margin: 20px auto; background-color: #fff; padding: 20px; box-shadow: 0 0 10px rgba(0,0,0,0.1); border-radius: 8px; }
+        .container { max-width: 95%; margin: 20px auto; background-color: #fff; padding: 20px; box-shadow: 0 0 10px rgba(0,0,0,0.1); border-radius: 8px; }
         .header { background-color: #007bff; color: white; padding: 20px; border-radius: 8px 8px 0 0; margin: -20px -20px 20px -20px; }
         .header h1 { margin: 0; font-size: 1.8em; }
         .header-info { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 10px; font-size: 0.9em; }
@@ -149,6 +149,26 @@ class HTMLReportGenerator:
         th { background-color: #007bff; color: white; }
         tr:nth-child(even) { background-color: #f2f2f2; }
         
+        /* Transcript Tab Overflow Fix */
+        .transcript-tab-container { 
+            display: flex; 
+            flex-direction: column; 
+            height: calc(100vh - 550px); 
+            min-height: 500px; 
+            max-height: 1200px; 
+        }
+        .transcript-header { flex-shrink: 0; margin-bottom: 10px; }
+        .transcript-stats { flex-shrink: 0; margin-bottom: 15px; }
+        .transcript-container { 
+            flex: 1; 
+            overflow-y: auto; 
+            border: 1px solid #ddd; 
+            border-radius: 4px; 
+            padding: 10px; 
+            background: white;
+            min-height: 0;
+        }
+        
         /* Timeline-based UI Styles */
         .timeline-container { background: #f8f9fa; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
         .timeline-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
@@ -158,9 +178,9 @@ class HTMLReportGenerator:
         .timeline-button:disabled { background: #6c757d; cursor: not-allowed; }
         .timeline-info { font-size: 14px; color: #666; }
         
-        .timeline-main { display: flex; gap: 20px; height: 500px; }
-        .timeline-sidebar { width: 300px; display: flex; flex-direction: column; }
-        .timeline-content { flex: 1; display: flex; flex-direction: column; }
+        .timeline-main { display: flex; gap: 20px; height: calc(100vh - 550px); min-height: 500px; max-height: 1200px; }
+        .timeline-sidebar { width: 300px; display: flex; flex-direction: column; min-height: 0; }
+        .timeline-content { flex: 1; display: flex; flex-direction: column; min-height: 0; }
         
         .timeline-slider-container { margin-bottom: 15px; }
         .timeline-slider { width: 100%; height: 8px; background: #ddd; border-radius: 4px; outline: none; cursor: pointer; }
@@ -176,10 +196,10 @@ class HTMLReportGenerator:
         .segment-time { font-family: monospace; font-size: 12px; color: #666; margin-bottom: 4px; }
         .segment-text { font-size: 14px; line-height: 1.4; }
         
-        .screenshot-viewer { flex: 1; display: flex; flex-direction: column; border: 1px solid #ddd; border-radius: 4px; background: white; }
-        .screenshot-header { padding: 15px; border-bottom: 1px solid #eee; background: #f8f9fa; }
-        .screenshot-content { flex: 1; padding: 15px; display: flex; align-items: center; justify-content: center; background: #fafafa; }
-        .screenshot-image { max-width: 100%; max-height: 100%; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .screenshot-viewer { flex: 1; display: flex; flex-direction: column; border: 1px solid #ddd; border-radius: 4px; background: white; min-height: 0; overflow: hidden; }
+        .screenshot-header { padding: 15px; border-bottom: 1px solid #eee; background: #f8f9fa; flex-shrink: 0; }
+        .screenshot-content { flex: 1; padding: 15px; display: flex; align-items: center; justify-content: center; background: #fafafa; overflow: hidden; min-height: 0; }
+        .screenshot-image { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
         .screenshot-placeholder { color: #999; font-style: italic; text-align: center; }
         
         .timeline-stats { display: flex; gap: 20px; margin-top: 15px; font-size: 14px; color: #666; }
@@ -210,27 +230,34 @@ class HTMLReportGenerator:
         
         # Extract key metrics
         total_duration = benchmark_data.get("total_duration_seconds", 0)
-        media_duration = benchmark_data.get("media_info", {}).get("duration_seconds", 0)
         
         # Hardware info
-        hw_info = benchmark_data.get("hardware_info", {})
-        cpu_name = hw_info.get("cpu", "N/A")
-        gpu_name = hw_info.get("gpu", "N/A")
+        hw_info = benchmark_data.get("hardware", {})
+        cpu_name = hw_info.get("processor", "N/A")
+        cpu_cores = hw_info.get("cpu_count", "N/A")
+        ram_gb = hw_info.get("ram_gb", "N/A")
+        
+        # GPU info
+        gpu_info = hw_info.get("gpu", {})
+        if gpu_info.get("available"):
+            gpu_name = gpu_info.get("name", "Unknown GPU")
+            gpu_count = gpu_info.get("count", 1)
+            cuda_version = gpu_info.get("cuda_version", "N/A")
+            gpu_display = f"{gpu_name} (CUDA {cuda_version})"
+        else:
+            gpu_display = "CPU only"
         
         # Config info
         config = benchmark_data.get("config", {})
-        model_name = config.get("model", {}).get("name", "N/A")
-        device = config.get("model", {}).get("device", "N/A")
+        model_name = config.get("model", "N/A")
+        device = config.get("device", "N/A")
+        processing_mode = config.get("processing_mode", "Unknown")
+        segmentation_mode = config.get("segmentation_mode", "N/A")
         
         # Metrics
         metrics = benchmark_data.get("metrics", {})
-        rtf = metrics.get("real_time_factor", 0)
         speedup = metrics.get("speedup", 0)
-        
-        # Results
-        results = benchmark_data.get("results", {})
-        word_count = results.get("word_count", 0)
-        screenshot_count = results.get("screenshot_count", 0)
+        rtf = metrics.get("rtf", 0)
         
         # Format processing time
         processing_time_str = f"{total_duration:.1f}s"
@@ -239,21 +266,30 @@ class HTMLReportGenerator:
             seconds = total_duration % 60
             processing_time_str = f"{minutes}m {seconds:.0f}s"
         
+        # Processing mode badge color
+        mode_color = "rgba(76, 175, 80, 0.2)" if processing_mode == "Segmented" else "rgba(33, 150, 243, 0.2)"
+        
         return f'''
             <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.3);">
-                <div style="font-size: 0.95em; margin-bottom: 8px;"><strong>⚡ Performance</strong></div>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; font-size: 0.85em;">
-                    <div style="background-color: rgba(255,255,255,0.1); padding: 6px 10px; border-radius: 4px;">
-                        <strong>Processing Time:</strong> {processing_time_str} ({speedup:.2f}x realtime)
+                <div style="font-size: 0.95em; margin-bottom: 8px;"><strong>⚡ Processing Information</strong></div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; font-size: 0.85em;">
+                    <div style="background-color: rgba(255,255,255,0.1); padding: 8px 12px; border-radius: 4px;">
+                        <strong>⏱️ Processing Time:</strong> {processing_time_str}
                     </div>
-                    <div style="background-color: rgba(255,255,255,0.1); padding: 6px 10px; border-radius: 4px;">
-                        <strong>Model:</strong> {model_name} ({device.upper()})
+                    <div style="background-color: rgba(255,255,255,0.1); padding: 8px 12px; border-radius: 4px;">
+                        <strong>⚡ Speedup:</strong> {speedup:.2f}x realtime (RTF: {rtf:.3f})
                     </div>
-                    <div style="background-color: rgba(255,255,255,0.1); padding: 6px 10px; border-radius: 4px;">
-                        <strong>CPU:</strong> {cpu_name}
+                    <div style="background-color: {mode_color}; padding: 8px 12px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2);">
+                        <strong>🎯 Mode:</strong> {processing_mode}
                     </div>
-                    <div style="background-color: rgba(255,255,255,0.1); padding: 6px 10px; border-radius: 4px;">
-                        <strong>GPU:</strong> {gpu_name}
+                    <div style="background-color: rgba(255,255,255,0.1); padding: 8px 12px; border-radius: 4px;">
+                        <strong>🤖 Model:</strong> {model_name}
+                    </div>
+                    <div style="background-color: rgba(255,255,255,0.1); padding: 8px 12px; border-radius: 4px;">
+                        <strong>🎮 GPU:</strong> {gpu_display}
+                    </div>
+                    <div style="background-color: rgba(255,255,255,0.1); padding: 8px 12px; border-radius: 4px;">
+                        <strong>💻 CPU:</strong> {cpu_cores} cores, {ram_gb}GB RAM
                     </div>
                 </div>
             </div>
@@ -307,9 +343,8 @@ class HTMLReportGenerator:
         <div class="tabs">
             <div class="tab active" onclick="showTab('active_transcript', 'active_file_container')" data-tab="active_transcript">📝 Transkript</div>
             <div class="tab" onclick="showTab('active_statistics', 'active_file_container')" data-tab="active_statistics">📊 Statistiken & Parameter</div>
-            <div class="tab" onclick="showTab('active_screenshots', 'active_file_container')" data-tab="active_screenshots">🖼️ Screenshots</div>
             <div class="tab" onclick="showTab('active_pdfs', 'active_file_container')" data-tab="active_pdfs">📄 PDFs</div>
-            <div class="tab" onclick="showTab('active_mapping', 'active_file_container')" data-tab="active_mapping">🔗 Mapping</div>
+            <div class="tab" onclick="showTab('active_mapping', 'active_file_container')" data-tab="active_mapping">🔗 Timeline</div>
         </div>
 
         <div id="active_transcript" class="tab-content active">
@@ -317,9 +352,6 @@ class HTMLReportGenerator:
         </div>
         <div id="active_statistics" class="tab-content">
             {self._initial_statistics_html(first_result_data)}
-        </div>
-        <div id="active_screenshots" class="tab-content">
-            {self._initial_screenshots_html(first_result_data.get("screenshots", []))}
         </div>
         <div id="active_pdfs" class="tab-content">
             {self._initial_pdfs_html(first_result_data.get("related_pdfs", []))}
@@ -345,7 +377,7 @@ class HTMLReportGenerator:
             start_formatted = format_timestamp_seconds(segment.get("start", 0))
             end_formatted = format_timestamp_seconds(segment.get("end", 0))
             text = (segment.get("text") or "").strip()
-            confidence = segment.get("confidence", 0)
+            confidence = segment.get("confidence", 0) or 0  # Handle None values from parallel processing
             # Simplified confidence class for initial render, JS can be more detailed
             confidence_class = "high-confidence" if confidence > 0.8 else ("medium-confidence" if confidence > 0.6 else "low-confidence")
             if not text: continue
@@ -361,9 +393,11 @@ class HTMLReportGenerator:
         full_text = actual_transcription_data.get("text", "")
         word_count = len(full_text.split()) if full_text else 0
         return f'''
-            <div class="section">
-                <h2>📝 Transkript</h2>
-                <div class="section-stats">
+            <div class="section transcript-tab-container">
+                <div class="transcript-header">
+                    <h2>📝 Transkript</h2>
+                </div>
+                <div class="transcript-stats section-stats">
                     <span>Segmente: {len(actual_transcription_data.get("segments", []))}</span>
                     <span>Wörter: {word_count}</span>
                     <span>Zeichen: {len(full_text)}</span>
@@ -375,15 +409,12 @@ class HTMLReportGenerator:
     def _initial_statistics_html(self, file_data: dict) -> str:
         # Placeholder for initial statistics. JS will generate the full content.
         return '<div class="section"><h2>📊 Statistiken & Parameter</h2><div class="empty-state"><p>Statistiken werden geladen...</p></div></div>'
-
-    def _initial_screenshots_html(self, screenshots: list) -> str:
-        return '<div class="section"><h2>🖼️ Screenshots</h2><div class="empty-state"><p>Screenshots werden geladen...</p></div></div>'
         
     def _initial_pdfs_html(self, pdfs: list) -> str:
         return '<div class="section"><h2>📄 PDFs</h2><div class="empty-state"><p>PDFs werden geladen...</p></div></div>'
 
     def _initial_mapping_html(self, mapping_data: list) -> str:
-        return '<div class="section"><h2>🔗 Mapping</h2><div class="empty-state"><p>Mapping-Daten werden geladen...</p></div></div>'
+        return '<div class="section"><h2>🔗 Timeline</h2><div class="empty-state"><p>Timeline-Daten werden geladen...</p></div></div>'
 
     def _get_embedded_javascript(self, all_analysis_results: List[Dict]) -> str:
         """Generate JavaScript for tab navigation, search, and dynamic content updates."""
@@ -662,7 +693,7 @@ class HTMLReportGenerator:
                 const actualTranscriptionData = transcriptionData && transcriptionData.transcription ? transcriptionData.transcription : transcriptionData;
                 
                 if (!actualTranscriptionData || !actualTranscriptionData.segments || actualTranscriptionData.segments.length === 0) {
-                    tabContent.innerHTML = '<div class="section"><h2>📝 Transkript</h2><div class="empty-state"><p>Kein Transkript verfügbar.</p></div></div>';
+                    tabContent.innerHTML = '<div class="section"><div class="empty-state"><p>Kein Transkript verfügbar.</p></div></div>';
                     return;
                 }
 
@@ -688,9 +719,11 @@ class HTMLReportGenerator:
                 const wordCount = fullText ? fullText.split(/\s+/).filter(Boolean).length : 0;
                 
                 tabContent.innerHTML = `
-                    <div class="section">
-                        <h2>📝 Transkript</h2>
-                        <div class="section-stats">
+                    <div class="section transcript-tab-container">
+                        <div class="transcript-header">
+                            <h2>📝 Transkript</h2>
+                        </div>
+                        <div class="transcript-stats section-stats">
                             <span>Segmente: ${actualTranscriptionData.segments.length}</span>
                             <span>Wörter: ${wordCount}</span>
                             <span>Zeichen: ${fullText.length}</span>
@@ -735,51 +768,6 @@ class HTMLReportGenerator:
                 }
                 html += '</div>';
                 tabContent.innerHTML = html;
-            }
-
-            function updateScreenshotsTab(screenshots) {
-                const tabContent = document.getElementById('active_screenshots');
-                if (!screenshots || screenshots.length === 0) {
-                    tabContent.innerHTML = '<div class="section"><h2>🖼️ Screenshots</h2><div class="empty-state"><p>Keine Screenshots verfügbar.</p></div></div>';
-                    return;
-                }
-                let imagesHtml = screenshots.map(ss => {
-                    // Fix: Use correct property (filepath instead of path) and handle relative paths
-                    let imagePath = ss.filepath || ss.path;
-                    if (imagePath) {
-                        // Convert backslashes to forward slashes
-                        imagePath = imagePath.replace(/\\/g, '/');
-                        
-                        // Extract folder ending with screenshots + filename
-                        // This matches patterns like:
-                        // - results/mad/VideoName/screenshots/file.jpg -> VideoName_screenshots/file.jpg
-                        // - VideoName_screenshots/file.jpg -> VideoName_screenshots/file.jpg
-                        const screenshotsMatch = imagePath.match(/([^\/]+)\/screenshots\/([^\/]+)$/i);
-                        if (screenshotsMatch) {
-                            // Use VideoName_screenshots/filename format
-                            const videoName = screenshotsMatch[1];
-                            const filename = screenshotsMatch[2];
-                            imagePath = videoName + '_screenshots/' + filename;
-                        } else {
-                            // Already in correct format or try to extract last folder + filename
-                            const pathParts = imagePath.split('/');
-                            const filename = pathParts[pathParts.length - 1];
-                            const folderName = pathParts[pathParts.length - 2] || '';
-                            if (folderName) {
-                                imagePath = folderName + '/' + filename;
-                            } else {
-                                imagePath = filename;
-                            }
-                        }
-                    }
-                    return `
-                        <div class="stats-card">
-                            <img src="${imagePath}" alt="Screenshot at ${formatTimestamp(ss.timestamp)}" style="max-width: 100%; height: auto; border-radius: 4px;" onerror="this.style.display='none'; this.nextElementSibling.innerHTML='❌ Image not found: ${imagePath}';">
-                            <p style="text-align: center; margin-top: 5px;">Timestamp: ${formatTimestamp(ss.timestamp)}</p>
-                        </div>
-                    `;
-                }).join('');
-                tabContent.innerHTML = `<div class="section"><h2>🖼️ Screenshots</h2><div style="display: flex; flex-wrap: wrap; gap: 15px;">${imagesHtml}</div></div>`;
             }
 
             function updatePDFsTab(pdfs) {
@@ -929,7 +917,6 @@ class HTMLReportGenerator:
                 updateHeader(selectedFileData);
                 updateTranscriptTab(selectedFileData.transcription);
                 updateStatisticsTab(selectedFileData);
-                updateScreenshotsTab(selectedFileData.screenshots);
                 updatePDFsTab(selectedFileData.related_pdfs);
                 
                 // Extract segments for timeline
@@ -971,11 +958,10 @@ class HTMLReportGenerator:
                 fileSelector.disabled = true;
                 // Clear content areas or show a general error message
                 updateHeader(null); // Clear header
-                document.getElementById('active_transcript').innerHTML = '<div class="section"><h2>📝 Transkript</h2><div class="empty-state"><p>Keine Daten zum Anzeigen.</p></div></div>';
+                document.getElementById('active_transcript').innerHTML = '<div class="section"><div class="empty-state"><p>Keine Daten zum Anzeigen.</p></div></div>';
                 document.getElementById('active_statistics').innerHTML = '<div class="section"><h2>📊 Statistiken & Parameter</h2><div class="empty-state"><p>Keine Daten zum Anzeigen.</p></div></div>';
-                document.getElementById('active_screenshots').innerHTML = '<div class="section"><h2>🖼️ Screenshots</h2><div class="empty-state"><p>Keine Daten zum Anzeigen.</p></div></div>';
                 document.getElementById('active_pdfs').innerHTML = '<div class="section"><h2>📄 PDFs</h2><div class="empty-state"><p>Keine Daten zum Anzeigen.</p></div></div>';
-                document.getElementById('active_mapping').innerHTML = '<div class="section"><h2>🔗 Mapping</h2><div class="empty-state"><p>Keine Daten zum Anzeigen.</p></div></div>';
+                document.getElementById('active_mapping').innerHTML = '<div class="section"><h2>🔗 Timeline</h2><div class="empty-state"><p>Keine Daten zum Anzeigen.</p></div></div>';
             }
         });
         '''
